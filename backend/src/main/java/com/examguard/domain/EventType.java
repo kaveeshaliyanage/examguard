@@ -1,0 +1,5 @@
+package com.examguard.domain;
+
+public enum EventType {
+    NAVIGATION, HEARTBEAT, TAB_HIDDEN, TAB_VISIBLE, EXTENSION_CONNECTED, EXTENSION_DISCONNECTED
+}
