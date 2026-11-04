@@ -1,0 +1,62 @@
+package com.examguard.domain;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "exam")
+@Getter
+@Setter
+@NoArgsConstructor
+public class Exam {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String code;
+
+    @Column(nullable = false)
+    private String title;
+
+    @Column(columnDefinition = "text")
+    private String description;
+
+    @Column(name = "duration_minutes", nullable = false)
+    private Integer durationMinutes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ExamStatus status = ExamStatus.DRAFT;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "created_by", nullable = false)
+    private User createdBy;
+
+    @Column(name = "opens_at")
+    private Instant opensAt;
+
+    @Column(name = "closes_at")
+    private Instant closesAt;
+
+    @Column(name = "allow_extension", nullable = false)
+    private boolean allowExtension = true;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+        if (status == null) {
+            status = ExamStatus.DRAFT;
+        }
+    }
+}

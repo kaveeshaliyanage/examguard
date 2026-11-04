@@ -1,0 +1,143 @@
+# ExamGuard AI
+
+Multi-evidence review of online examination submissions. Students take a short-answer exam in the
+platform; permitted browser activity is observed by an optional Chrome extension; after submission a
+Python analysis service produces two **separate** kinds of review findings:
+
+| Output | Purpose |
+| --- | --- |
+| Candidate incident | One candidate's observed resource use, coverage gaps and nearby answer changes. |
+| Candidate pair | Similarity, distinctive shared patterns and timing relationships between two candidates. |
+
+A website visit by one candidate never contributes to a pair finding. The isolation is structural:
+the backend sends pair analysis a payload that cannot contain activity events, and sends incident
+analysis a separate payload. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+`priorityScore` (0-100) is **review priority**, not a probability of misconduct. Nothing in this
+system decides that a student cheated. Lecturers review the evidence and record a decision with a
+rationale. Coverage warnings are shown wherever evidence is incomplete: missing observations are
+unknown, not clean.
+
+## What is in the repository
+
+| Part | Stack | Status |
+| --- | --- | --- |
+| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL | Complete: auth, exams, permissions, attempts, autosave, events, heartbeat, analysis orchestration, findings, decisions, audit |
+| `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, isolated payloads |
+| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query | Complete: staff dashboard, findings review, decisions, audit, student exam flow, autosave, countdown |
+| `extension/` | Chrome MV3, TypeScript | Complete: domain-only observation, persistent queue, batching, backoff, reconnect flow |
+
+Tests: 36 backend, 31 AI, 22 frontend, 13 extension.
+
+## Quick start with Docker
+
+```bash
+cp .env.example .env            # set JWT_SECRET to 32+ random characters
+docker compose up --build
+```
+
+- App: http://localhost:5173
+- API: http://localhost:8080/api
+- Analysis service: http://localhost:8000/docs
+- MySQL: `localhost:3307`
+
+```bash
+curl http://localhost:8080/api/health
+# {"status":"UP","database":"UP","analysis":"UP"}
+```
+
+Demo accounts created on first start:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Administrator | admin@examguard.local | Admin123! |
+| Lecturer | lecturer@examguard.local | Lecturer123! |
+| Reviewer | reviewer@examguard.local | Reviewer123! |
+
+The seeded exam is `DEMO-101` with candidate codes `C001` ... `C008`.
+
+## Demo flow
+
+1. Sign in as lecturer at `/login`, open `DEMO-101`, click **Run analysis**.
+2. **Pairs** tab: `C001`/`C002` share a rare phrase and have aligned answer changes.
+3. **Incidents** tab: `C004` visited a prohibited domain shortly before an answer change.
+4. Open a finding, inspect evidence and answer revisions, record a decision and a rationale
+   (at least 10 characters). Every decision is audited.
+5. Student side: `/join` with `DEMO-101` and candidate code `C009`, answer, submit, then run
+   analysis again.
+
+The extension is optional. Load `extension/dist` as an unpacked extension, connect it with the
+attempt's collector token shown on the student page, and only domains and event times are sent.
+Page content, URLs with paths, keystrokes, screenshots and webcam are never collected.
+
+## Local development (without Docker)
+
+Prerequisites: JDK 21, Maven 3.9+, Node 20+, MySQL 8 (port 3307 by default), Python 3.11-3.13.
+
+```bash
+# 1. database (or use docker compose up mysql)
+mysql -h 127.0.0.1 -P 3307 -u root -e "CREATE DATABASE IF NOT EXISTS examguard"
+
+# 2. analysis service
+cd ai
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m uvicorn app.main:app --reload --port 8000
+
+# 3. backend
+cd backend
+JWT_SECRET=dev-only-secret-change-me-0123456789abcdef mvn spring-boot:run
+
+# 4. frontend
+cd frontend
+npm ci
+cp .env.example .env.local
+npm run dev                      # http://localhost:5173, proxies /api to :8080
+
+# 5. extension
+cd extension
+npm ci
+npm run build                    # then load extension/dist unpacked
+```
+
+Tests and checks:
+
+```bash
+cd backend   && mvn test
+cd ai        && pytest -q && python -m app.evaluation.run_eval
+cd frontend  && npm test && npm run typecheck && npm run build
+cd extension && npm test && npm run typecheck && npm run build
+```
+
+The extension popup asks for the API base URL (default `http://localhost:8080/api`) and the
+collector token for an in-progress attempt. The backend accepts `chrome-extension://*` origins
+because the manifest deliberately keeps `host_permissions` empty.
+
+## Configuration
+
+All backend configuration is environment driven; see [`.env.example`](.env.example).
+`JWT_SECRET` must be at least 32 bytes. Schema changes are Flyway migrations only; production
+profiles use `ddl-auto: validate` and never `update`. Frontend build-time variables are documented
+in [`frontend/.env.example`](frontend/.env.example).
+
+## Deliberately out of scope
+
+Grading, question banks, scheduling, lock-down browsers, video proctoring, keystroke capture,
+social-media checks, automated sanctions, SSO/LTI, multi-tenancy and mobile apps. This is a triage
+and research platform for low-stakes demonstrations and consented pilots, not a replacement for
+institutional assessment systems.
+
+## Production hardening checklist
+
+The code is production-shaped, not certified for real graded examinations. Before any real use:
+
+- Complete an ethics/DPIA review, student disclosure and consent flow.
+- Replace the demo JWT secret, use HTTPS, rotate secrets, add rate limiting and account lockout.
+- Sign and distribute the extension through an organisation policy; pin its ID.
+- Add observability (structured logs, metrics, tracing), backups, retention and deletion jobs.
+- Validate the analysis on held-out cohorts and calibrate or remove any displayed numeric score.
+- Provide an appeal path and human oversight. The EU AI Act treats AI that detects prohibited
+  behaviour during tests as high-risk; obligations apply to real deployments.
+
+More detail: [`docs/ETHICS_AND_LIMITS.md`](docs/ETHICS_AND_LIMITS.md),
+[`docs/EVALUATION.md`](docs/EVALUATION.md), [`docs/HANDOFF.md`](docs/HANDOFF.md).

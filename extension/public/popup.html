@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ExamGuard Monitoring</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>ExamGuard Monitoring</h1>
+      <p class="subtitle">Domain-level activity for your own attempt.</p>
+    </header>
+
+    <section id="status" class="status" aria-live="polite">
+      <span id="status-label">Not connected</span>
+      <span id="status-detail"></span>
+    </section>
+
+    <form id="connection-form">
+      <label for="api-base">API base URL</label>
+      <input id="api-base" name="apiBase" type="url" placeholder="http://localhost:8080/api" required />
+
+      <label for="token">Connection token</label>
+      <textarea id="token" name="token" rows="3" placeholder="Paste the token shown on the exam page" required></textarea>
+
+      <div class="actions">
+        <button id="connect" type="submit">Connect</button>
+        <button id="disconnect" type="button" class="secondary" disabled>Disconnect</button>
+      </div>
+      <p id="message" class="message" role="alert"></p>
+    </form>
+
+    <footer>
+      <p>
+        Only domain names and navigation times are sent, to the attempt that issued your token.
+        Page content, keystrokes, clipboard and screenshots are never collected.
+      </p>
+      <p>This extension never blocks a page and never decides whether behaviour is misconduct.</p>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

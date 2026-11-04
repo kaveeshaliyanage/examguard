@@ -1,0 +1,38 @@
+# secrets
+.env
+*.pem
+
+# java
+backend/target/
+*.class
+
+# python
+ai/.venv/
+ai/__pycache__/
+ai/**/__pycache__/
+ai/.pytest_cache/
+ai/.mypy_cache/
+ai/models/*.joblib
+*.pyc
+
+# node
+node_modules/
+frontend/dist/
+extension/dist/
+frontend/.vite/
+*.tsbuildinfo
+coverage/
+
+# ide / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# runtime
+*.log
+.tools/
+
+# office lock files
+~$*
+docs/.qoder-office-pptx-locks/

@@ -1,0 +1,10 @@
+[project]
+name = "examguard-analysis"
+version = "0.1.0"
+description = "Feature extraction and review-priority fusion for ExamGuard AI"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

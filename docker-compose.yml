@@ -1,0 +1,85 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-examguard}
+      MYSQL_USER: ${MYSQL_USER:-examguard}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-examguard}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me-root}
+    ports:
+      - "${MYSQL_HOST_PORT:-3307}:3306"
+    volumes:
+      - examguard_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  ai:
+    build:
+      context: ./ai
+      args:
+        INSTALL_SEMANTIC: ${INSTALL_SEMANTIC:-false}
+    environment:
+      SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
+      SEMANTIC_MODEL: ${SEMANTIC_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      USE_LEARNED_FUSION: ${USE_LEARNED_FUSION:-false}
+      MODEL_DIR: /app/models
+      MIN_PAIR_PRIORITY: ${MIN_PAIR_PRIORITY:-20}
+      MIN_INCIDENT_PRIORITY: ${MIN_INCIDENT_PRIORITY:-10}
+    ports:
+      - "${AI_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-examguard}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-examguard}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-examguard}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to at least 32 characters in .env}
+      JWT_STAFF_TTL_MINUTES: ${JWT_STAFF_TTL_MINUTES:-480}
+      JWT_ATTEMPT_TTL_MINUTES: ${JWT_ATTEMPT_TTL_MINUTES:-360}
+      ANALYSIS_BASE_URL: http://ai:8000
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      SERVER_PORT: 8080
+    ports:
+      - "${BACKEND_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+volumes:
+  examguard_mysql:

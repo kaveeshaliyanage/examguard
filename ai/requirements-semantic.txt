@@ -1,0 +1,4 @@
+-r requirements.txt
+# Optional. Large download; enables the semantic-similarity evidence source.
+# Build the image with: docker build --build-arg INSTALL_SEMANTIC=true ...
+sentence-transformers>=3.3
