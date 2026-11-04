@@ -45,12 +45,18 @@ Report A -> B -> C -> D on the same held-out cohort. Do not tune thresholds on t
 ## Scale
 
 `ai/tests/test_performance.py` runs pair analysis on 100 candidates and four questions (4,950
-pairs) and fails above 10 seconds, the acceptance target for the software-quality criterion. The
-measurement excludes one-time interpreter and scikit-learn import cost: the test warms up first.
+pairs) and fails above 10 seconds, the acceptance target for the software-quality criterion. Each
+candidate carries distinct answer text, so no comparison is served from the per-request similarity
+cache. The measurement excludes one-time interpreter and scikit-learn import cost: the test warms up
+first and reports the median of three samples.
+
+Timing similarity is a character 5-gram Dice coefficient over counters built once per revision. It
+replaced a character-level sequence matcher whose per-comparison cost grew with answer length and
+dominated 100-candidate runs.
 
 Observed on the development machine (Windows, Intel i5-8250U, 8 GB RAM, Python 3.14, scikit-learn
-lexical backend, semantic model disabled): 4.1-5.8 s warm, 10.4 s including the first-request
-import. Re-measure on the reference machine before quoting a figure, and treat the cold-start
+lexical backend, semantic model disabled): 2.5-2.8 s warm (median 2.7 s) with the machine at roughly
+40% CPU. Re-measure on the reference machine before quoting a figure, and treat the cold-start
 number as a deployment consideration.
 
 ## Splitting and leakage

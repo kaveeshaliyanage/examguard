@@ -90,6 +90,7 @@ def analyze_pairs(
         if use_timing
         else []
     )
+    similarity_cache: dict[tuple[str, str], float] | None = {} if use_timing else None
     patterns = (
         compute_patterns(candidates, question_ids, request.config.rareDfMax)
         if use_patterns and n > 1
@@ -164,6 +165,7 @@ def analyze_pairs(
                     timing_profiles[j],
                     question_ids,
                     window_seconds=request.config.timingWindowSeconds,
+                    similarity_cache=similarity_cache,
                 )
 
             coverage_warning = substantive < 2
