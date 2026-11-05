@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "ExamGuard Monitoring",
+  "version": "0.1.0",
+  "description": "Sends domain-level exam activity to the candidate's own attempt.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "ExamGuard Monitoring" },
+  "host_permissions": []
+}
