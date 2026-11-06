@@ -86,7 +86,7 @@ the default and the fallback.
 | SIMILARITY | SBERT cosine, normalized by cohort baseline (optional) | 0.22 |
 | PATTERN | containment of rare 3-6 word shingles | 0.28 |
 | PATTERN | rare overlap across different questions | 0.10 |
-| TIMING | aligned content-changing revisions within 120 s | 0.12 |
+| TIMING | aligned content-changing revisions within 120 s (5-gram Dice >= 0.62) | 0.12 |
 
 When semantic embeddings are unavailable the weights renormalize (lexical 0.36, pattern 0.36,
 cross-question 0.13, timing 0.15). Every contribution appears as an evidence item with the raw
