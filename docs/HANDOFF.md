@@ -19,7 +19,7 @@ three places:
 A `priorityScore` (0–100) is **review priority**, never a probability of misconduct. Bands are
 LOW 0–29, MEDIUM 30–54, HIGH 55–74, CRITICAL 75–100. Coverage warnings travel with the finding.
 
-## 1. Current state (verified 2026-11-01)
+## 1. Current state (verified 2026-11-07)
 
 | Area | State | Verification performed |
 | --- | --- | --- |
@@ -30,38 +30,56 @@ LOW 0–29, MEDIUM 30–54, HIGH 55–74, CRITICAL 75–100. Coverage warnings t
 | Public join, autosave, submit, events, heartbeat | Complete | `AttemptApiTest`; live join/save/dedupe/submit/rejoin |
 | Analysis orchestration | Complete | `AnalysisFlowTest`, `AnalysisPayloadIsolationTest`; live run |
 | Review workflow | Complete | `ReviewWorkflowTest`; live decision and audit |
-| Python analysis service | Complete | 31 pytest tests; live pair and incident output; 100-candidate benchmark |
+| Python analysis service | Complete | 40 pytest tests; live pair and incident output; 100-candidate benchmark |
+| Learned-fusion training pipeline | Complete | export → train → load → infer consistency test; metrics in `docs/TRAINING.md` |
 | React dashboard and student exam flow | Complete | 22 Vitest tests, `tsc --noEmit`, `vite build`; browser walkthrough |
 | Chrome MV3 extension | Complete | 13 Vitest tests, typecheck, build; extension-origin API simulation |
-| Docker Compose stack | MySQL + AI + backend + frontend defined | Not executed as a full stack in this environment |
-| CI | `.github/workflows/ci.yml` for all four components | Not yet run on a remote runner |
+| Docker Compose stack | Complete | Full stack run 2026-11-07: health `UP/UP/UP`, login, analysis, decision, audit, student join/save/submit/rejoin through the nginx proxy |
+| CI | `.github/workflows/ci.yml` for four components plus a compose smoke job | Pending first remote run after the history rewrite |
+| CD | `.github/workflows/cd.yml`: GHCR images, extension release, optional VPS deploy | Pending first `v*` tag run |
 
 Exact verified results:
 
 ```text
 backend:  mvn test   -> 36 tests, 0 failures
-ai:       pytest -q  -> 31 tests, 0 failures
+ai:       pytest -q  -> 40 tests, 0 failures
 frontend: npm test   -> 22 tests, 0 failures (tsc and vite build pass)
 extension: npm test  -> 13 tests, 0 failures (tsc and vite build pass)
 live:     /api/health -> {"status":"UP","database":"UP","analysis":"UP"}
-live:     DEMO-101 run -> pair C001/C002, incidents C004 and C007, none for C008
+live:     DEMO-101 run -> pair C001/C002 (LOW 28.58), incidents C004 (HIGH 56.85) and
+                          C007 (LOW 22.71, coverage 15.8%), none for C008
+live:     decision NEEDS_INFO accepted, FINDING_DECISION audit entry written
+live:     join C009/C010, autosave dedupe, submit, mid-attempt rejoin keep the same attempt
+train:    pair AP 0.805 / AUC 0.963; incident AP 1.0 (synthetic holdout, 150+150 cohorts)
 ```
 
 The demo run produced `HIGH` review priority for C004, `LOW` for C001/C002 and C007, and a coverage
 warning on C007. C008 and a candidate without the extension produced no incident: unknown activity is
-not treated as clean.
+not treated as clean. Pair evidence carried only `SIMILARITY`, `PATTERN` and `TIMING` sources; incident
+evidence carried only `ACTIVITY`, `ANSWER_CHANGE`, `PATTERN` and `COVERAGE`, and never a second
+candidate.
+
+This environment's link was too slow to pull the `eclipse-temurin:21-jre` base image, so the stack was
+run with the backend image built from the host-produced jar. The committed `backend/Dockerfile` is
+unchanged in behaviour and is exercised by the CI compose job and release builds.
 
 ## 2. Known gaps
 
-- The Compose stack has not been executed end to end in this environment; services were verified
-  individually. Run `docker compose up --build` once before claiming the container path works.
+- CI and CD have not yet run on a remote runner. The compose smoke job builds the real backend
+  Dockerfile, which is the one path this host could not exercise.
+- The CD deploy job is written but has never touched a VPS; `scripts/deploy.sh` was only syntax
+  checked. Set `VPS_*` secrets and `DEPLOY_ENABLED=true` after the first green tag build.
 - The extension passed unit tests and its API calls were simulated with a `chrome-extension://`
   origin, but it was not loaded into a packaged Chrome profile in this environment.
 - H2 tests use `ddl-auto: create-drop`; they do not validate the Flyway schema. The live MySQL run
   does validate it.
-- Semantic embeddings are optional and disabled by default. Learned fusion is experimental.
-- The synthetic evaluation measures the simulator. Never present its numbers as real-world accuracy.
+- Semantic embeddings are optional and disabled by default. Learned fusion is experimental and off
+  by default; when enabled it must keep the same caps as the rule path.
+- The synthetic evaluation and the trained models measure the simulator. Never present their numbers
+  as real-world accuracy.
 - The demo seeder uses scripted content. It is not evidence about real people.
+- Rejoining a *submitted* attempt returns 409; only in-progress attempts resume. This is intentional
+  but the student page shows a generic error for that case.
 
 ## 3. How to run
 
@@ -106,6 +124,25 @@ cd frontend  && npm test && npm run typecheck && npm run build
 cd extension && npm test && npm run typecheck && npm run build
 ```
 
+Training (optional learned fusion) and Kaggle:
+
+```bash
+cd ai
+python -m app.training.export --out data
+python -m app.training.train  --data data --out models
+python -m app.training.kaggle_publish dataset --data data
+python -m app.training.kaggle_publish models  --models models
+python -m app.training.kaggle_publish notebook --dataset <owner>/examguard-synthetic-fusion-rows
+```
+
+Release and deployment:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0   # CD publishes GHCR images and the extension release
+# on the VPS, with .env from deploy/.env.production.example:
+./scripts/deploy.sh v1.0.0
+```
+
 The extension popup asks for the API base URL and the collector token from the student page. The
 backend accepts `chrome-extension://*` origins because the manifest keeps `host_permissions` empty.
 
@@ -128,11 +165,12 @@ examguard/
     src/main/resources/db/migration/V1__schema.sql
     src/test/        API, isolation, matcher and workflow tests
   ai/
-    app/features/    text, lexical, semantic, patterns, timing, coverage, activity, fusion
+    app/features/    text, lexical, semantic, patterns, timing, coverage, activity, fusion, pair_rows
     app/services/    pair/incident analysis and evidence modules, analyzer.py re-exports
     app/evaluation/  metrics, synthetic cohorts, ablation runner
+    app/training/    cohort generator, export, trainer, licensed-corpus adapter, Kaggle publish
     app/schemas.py   strict pair/incident contracts
-    tests/           26 tests
+    tests/           40 tests
   frontend/
     src/api/         typed client, staff queries, attempt API
     src/components/  shell, chips, evidence panels
@@ -141,9 +179,14 @@ examguard/
   extension/
     src/             background, popup, queue, flush, domains, auth
     public/          manifest, popup page and styles
-  docs/              architecture, data model, API, evaluation, ethics, frontend spec
-  .github/           CI workflow
-  docker-compose.yml
+  kaggle/
+    notebooks/       offline training notebook (dataset → models)
+    README.md        CLI setup and publishing commands
+  docs/              architecture, data model, API, evaluation, training, deployment, ethics
+  deploy/            production env template
+  scripts/           deploy.sh
+  .github/           ci.yml (tests + compose smoke), cd.yml (GHCR, release, VPS deploy)
+  docker-compose.yml, docker-compose.prod.yml
 ```
 
 ## 5. Conventions that must not drift
@@ -176,6 +219,18 @@ examguard/
   accuracy.
 - Split by cohort and candidate, keep hard negatives, and state label leakage risks.
 - Optional learned fusion is experimental; default remains transparent rules.
+- Learned scores are overridden only before caps; `fuse_pair`/`fuse_incident` re-apply the 35/45/40
+  caps after the model score. Tests in `ai/tests/test_fusion.py` pin this.
+
+**Training**
+
+- Feature order is a contract: `PAIR_FEATURE_ORDER` and `INCIDENT_FEATURE_ORDER` must match the
+  vectors built by `ai/app/features/pair_rows.py` and the incident feature builder. The
+  export/inference consistency test fails if they drift.
+- Exported rows must be reproducible from the manifest seed, and every artifact keeps its
+  `*.meta.json` metrics and `MODEL_CARD.md`. Never publish a model without them.
+- Only cohorts with an allowed licence may enter `app.training.corpora`; the adapter rejects the
+  rest. Never upload real candidate answers to Kaggle.
 
 **Code**
 
@@ -197,3 +252,8 @@ A deployment build is complete when all of the following are true:
 7. A reviewer can record a decision with a rationale and see it in the audit trail.
 8. All backend, AI, frontend and extension tests pass; CI is green.
 9. `README.md` matches reality.
+
+Status on 2026-11-07: 1 (with the host-jar caveat above), 2, 3, 5, 6, 7 and 8 pass locally; 4 passed as
+an origin-level API simulation, not in a packaged browser; 8 awaits the first remote CI run; 9 is
+current. A release is not done until a `v*` tag produces green CD jobs and, if deploying, `deploy.sh`
+reports the stack healthy on the target host.

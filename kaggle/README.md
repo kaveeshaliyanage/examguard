@@ -11,6 +11,16 @@ The Kaggle CLI is the transport for three private artifacts:
 All three are created private. Nothing here changes the runtime score unless you set
 `USE_LEARNED_FUSION=true` and place the artifacts in `ai/models`.
 
+Published under `kaveeshaoshadi003` (2026-11-07):
+
+- https://www.kaggle.com/datasets/kaveeshaoshadi003/examguard-synthetic-fusion-rows
+- https://www.kaggle.com/datasets/kaveeshaoshadi003/examguard-fusion-models
+- https://www.kaggle.com/code/kaveeshaoshadi003/examguard-train-fusion
+
+The notebook starts from the dataset's `code/app` snapshot, trains both kinds and writes
+`/kaggle/working/models`; download that output with `kaggle kernels output` and copy the `.joblib`
+files into `ai/models`.
+
 ## Credentials
 
 Create a Kaggle API token at <https://www.kaggle.com/settings/api> and save it outside the repo:
