@@ -16,6 +16,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,6 +26,12 @@ NOTEBOOK_TEMPLATE = REPO_ROOT / "kaggle" / "notebooks" / "train_fusion.ipynb"
 DATASET_SLUG = "examguard-synthetic-fusion-rows"
 MODELS_SLUG = "examguard-fusion-models"
 NOTEBOOK_SLUG = "examguard-train-fusion"
+
+
+def _without_cache(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    if "__pycache__" in info.name or info.name.endswith(".pyc"):
+        return None
+    return info
 
 
 def _kaggle(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -64,7 +71,7 @@ def _dataset_metadata(owner: str, slug: str, title: str, subtitle: str, descript
         "description": description,
         "licenses": [{"name": "CC0-1.0"}],
         "isPrivate": True,
-        "keywords": ["education", "machine-learning"],
+        "keywords": ["education"],
     }
 
 
@@ -77,14 +84,12 @@ def stage_dataset(data_dir: Path, out_dir: Path) -> Path:
             raise SystemExit(f"{source} is missing; run app.training.export first")
         shutil.copy2(source, out_dir / name)
 
-    code_dir = out_dir / "code"
-    if code_dir.exists():
-        shutil.rmtree(code_dir)
-    shutil.copytree(
-        AI_ROOT / "app",
-        code_dir / "app",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
+    # Kaggle's uploader skips nested directories, so ship the package as one archive.
+    archive = out_dir / "code.tar.gz"
+    if archive.exists():
+        archive.unlink()
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(AI_ROOT / "app", arcname="app", filter=_without_cache)
 
     owner = username()
     metadata = _dataset_metadata(
@@ -104,19 +109,23 @@ def stage_dataset(data_dir: Path, out_dir: Path) -> Path:
     return out_dir
 
 
+def _create_or_version(staged: Path, message: str) -> None:
+    """Create the dataset, or upload a new version when the slug is taken.
+
+    The CLI exits 0 while printing "already in use", so the output decides.
+    """
+    created = _kaggle("datasets", "create", "-p", str(staged), "-r", "skip")
+    output = (created.stdout + created.stderr).lower()
+    if created.returncode == 0 and "error" not in output:
+        sys.stdout.write(created.stdout)
+        return
+    _run("datasets", "version", "-p", str(staged), "-m", message, "-r", "skip")
+
+
 def publish_dataset(data_dir: Path, build_dir: Path, message: str) -> str:
     staged = stage_dataset(data_dir, build_dir)
-    owner = username()
-    ref = f"{owner}/{DATASET_SLUG}"
-    created = _kaggle("datasets", "create", "-p", str(staged), "-r", "skip")
-    if created.returncode == 0:
-        sys.stdout.write(created.stdout)
-        return ref
-    if "already exists" not in (created.stderr + created.stdout).lower():
-        sys.stderr.write(created.stdout + created.stderr)
-        raise SystemExit("kaggle datasets create failed")
-    _run("datasets", "version", "-p", str(staged), "-m", message, "-r", "skip")
-    return ref
+    _create_or_version(staged, message)
+    return f"{username()}/{DATASET_SLUG}"
 
 
 def publish_models(models_dir: Path, build_dir: Path, message: str) -> str:
@@ -143,16 +152,8 @@ def publish_models(models_dir: Path, build_dir: Path, message: str) -> str:
     (build_dir / "dataset-metadata.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
     )
-    ref = f"{owner}/{MODELS_SLUG}"
-    created = _kaggle("datasets", "create", "-p", str(build_dir), "-r", "skip")
-    if created.returncode == 0:
-        sys.stdout.write(created.stdout)
-        return ref
-    if "already exists" not in (created.stderr + created.stdout).lower():
-        sys.stderr.write(created.stdout + created.stderr)
-        raise SystemExit("kaggle datasets create failed")
-    _run("datasets", "version", "-p", str(build_dir), "-m", message, "-r", "skip")
-    return ref
+    _create_or_version(build_dir, message)
+    return f"{owner}/{MODELS_SLUG}"
 
 
 def publish_notebook(dataset_ref: str, build_dir: Path) -> str:
