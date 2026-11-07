@@ -1,5 +1,8 @@
 # ExamGuard AI
 
+[![CI](https://github.com/kaveeshaliyanage/examguard/actions/workflows/ci.yml/badge.svg)](https://github.com/kaveeshaliyanage/examguard/actions/workflows/ci.yml)
+[![CD](https://github.com/kaveeshaliyanage/examguard/actions/workflows/cd.yml/badge.svg)](https://github.com/kaveeshaliyanage/examguard/actions/workflows/cd.yml)
+
 Multi-evidence review of online examination submissions. Students take a short-answer exam in the
 platform; permitted browser activity is observed by an optional Chrome extension; after submission a
 Python analysis service produces two **separate** kinds of review findings:

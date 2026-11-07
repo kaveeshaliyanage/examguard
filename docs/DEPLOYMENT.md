@@ -3,6 +3,14 @@
 Two paths exist. Local development uses `docker-compose.yml` and builds from source. Production
 uses `docker-compose.prod.yml` and pulls immutable images from GHCR.
 
+## Branches
+
+| Branch | Purpose |
+| --- | --- |
+| `main` | Released history. Only receives `--no-ff` merges from `develop`; tags are cut here. |
+| `develop` | Integration branch; CI runs on every push. |
+| `feature/*` | Short-lived work, merged into `develop` with `--no-ff` and deleted after release. |
+
 ## Release flow
 
 1. Merge to `main` (CI must be green, including the compose smoke job).
