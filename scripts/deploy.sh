@@ -16,21 +16,9 @@ fi
 export EXAMGUARD_VERSION="$VERSION"
 
 docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d --remove-orphans
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 240
 
-echo
-echo "Waiting for the stack to become healthy..."
-for _ in $(seq 1 60); do
-  unhealthy=$(docker compose -f docker-compose.prod.yml ps --format json 2>/dev/null \
-    | grep -c '"Health":"starting"' || true)
-  if [ "$unhealthy" = "0" ]; then
-    break
-  fi
-  sleep 5
-done
-
-docker compose -f docker-compose.prod.yml ps
-curl -fsS "http://localhost:${HTTP_PORT:-80}/api/health"
+HTTP_PORT="$(sed -n 's/^HTTP_PORT=//p' .env | tail -n1)"
+curl -fsS "http://127.0.0.1:${HTTP_PORT:-80}/api/health"
 echo
 echo "ExamGuard $VERSION is live."
