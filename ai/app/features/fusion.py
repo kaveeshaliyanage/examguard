@@ -117,7 +117,9 @@ def fuse_pair(
         scale = learned / score
         contributions = {k: round(v * scale, 2) for k, v in contributions.items()}
         score = learned
-        capped = capped and score >= PAIR_CAP_INCOMPLETE
+        if completeness_warning or coverage_warning:
+            score = min(score, PAIR_CAP_INCOMPLETE)
+            capped = True
 
     return FusionResult(
         score=max(0.0, min(100.0, round(score, 2))),
@@ -156,6 +158,12 @@ def fuse_incident(
         scale = learned / score
         contributions = {k: round(v * scale, 2) for k, v in contributions.items()}
         score = learned
+        if only_unclassified:
+            score = min(score, INCIDENT_CAP_UNCLASSIFIED_ONLY)
+            capped = True
+        if low_coverage:
+            score = min(score, INCIDENT_CAP_LOW_COVERAGE)
+            capped = True
 
     return FusionResult(
         score=max(0.0, min(100.0, round(score, 2))),
