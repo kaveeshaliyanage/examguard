@@ -84,6 +84,12 @@ Last local run with 150 cohorts and seed 7:
 The incident classifier is trivially separable because the label rule and the features come from the
 same hand-written logic. That is the circularity the model card warns about.
 
+The Kaggle run on 2026-11-07 (dataset version 1, same seed) reproduced these numbers exactly. The
+artifacts are pickled scikit-learn estimators: a run trained on Kaggle (scikit-learn 1.6.1 at the
+time) loads in a runtime with another version only with a warning. `_load_model` logs the mismatch
+and names both versions; retrain inside the serving environment, or pin scikit-learn, before
+enabling learned fusion in production.
+
 ## Splits and leakage
 
 Splits are made by cohort (70/15/15), never by row. Pairs from one cohort cannot appear in both
@@ -113,4 +119,5 @@ PAN-PC, SemEval-2013 Task 7, OULAD, consented pilot).
 ## Kaggle
 
 `kaggle/README.md` documents publishing the rows, the artifacts and the training notebook with the
-official CLI. The notebook runs offline: the dataset includes a snapshot of `ai/app`.
+official CLI. The notebook runs offline: the dataset ships `code.tar.gz` (a snapshot of `ai/app`)
+because the CLI skips nested directories, so the notebook extracts it before training.

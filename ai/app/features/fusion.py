@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 PAIR_WEIGHTS = {
     "lexical": 0.28,
@@ -83,12 +87,32 @@ def _load_model(kind: str) -> Any | None:
     path = settings.model_dir / f"{kind}_fusion.joblib"
     if not path.exists():
         return None
+    _warn_on_version_skew(kind)
     try:
         import joblib
 
         return joblib.load(path)
     except Exception:
         return None
+
+
+def _warn_on_version_skew(kind: str) -> None:
+    """Pickled estimators expect the training library versions; surface drift once."""
+    meta_path = settings.model_dir / f"{kind}_fusion.meta.json"
+    try:
+        import sklearn
+
+        trained = json.loads(meta_path.read_text(encoding="utf-8")).get("sklearnVersion")
+        if trained and trained != sklearn.__version__:
+            logger.warning(
+                "%s fusion model was trained with scikit-learn %s but %s is installed; "
+                "re-run training in this environment before enabling learned fusion",
+                kind,
+                trained,
+                sklearn.__version__,
+            )
+    except Exception:
+        return
 
 
 def fuse_pair(
