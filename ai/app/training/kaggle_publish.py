@@ -64,7 +64,7 @@ def _dataset_metadata(owner: str, slug: str, title: str, subtitle: str, descript
         "description": description,
         "licenses": [{"name": "CC0-1.0"}],
         "isPrivate": True,
-        "keywords": ["education", "academic-integrity", "synthetic"],
+        "keywords": ["education", "machine-learning"],
     }
 
 
