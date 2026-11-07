@@ -49,7 +49,7 @@ services:
     ports:
       - "${FRONTEND_HOST_PORT:-5173}:80"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -77,7 +77,7 @@ services:
     ports:
       - "${BACKEND_HOST_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
