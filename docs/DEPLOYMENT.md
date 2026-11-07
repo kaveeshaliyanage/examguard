@@ -40,6 +40,11 @@ every tag. Without it, deployment is manual or triggered through `workflow_dispa
 - A non-root deploy user in the `docker` group; the app directory owned by that user.
 - The repository cloned at `/opt/examguard` (or set `VPS_APP_DIR` to the real path).
 - `.env` copied from `deploy/.env.production.example` and filled in. Keep it `chmod 600`.
+- A GHCR login for the deploy user. The repository is private, so its packages are private too:
+  ```bash
+  printf '%s' "$GHCR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
+  ```
+  Use a token with `read:packages`. `scripts/deploy.sh` pulls as that user.
 - TLS terminated in front of port 80 (Caddy, nginx, or the cloud load balancer). The frontend
   container only speaks HTTP.
 

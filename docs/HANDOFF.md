@@ -35,8 +35,8 @@ LOW 0–29, MEDIUM 30–54, HIGH 55–74, CRITICAL 75–100. Coverage warnings t
 | React dashboard and student exam flow | Complete | 22 Vitest tests, `tsc --noEmit`, `vite build`; browser walkthrough |
 | Chrome MV3 extension | Complete | 13 Vitest tests, typecheck, build; extension-origin API simulation |
 | Docker Compose stack | Complete | Full stack run 2026-11-07: health `UP/UP/UP`, login, analysis, decision, audit, student join/save/submit/rejoin through the nginx proxy |
-| CI | `.github/workflows/ci.yml` for four components plus a compose smoke job | Pending first remote run after the history rewrite |
-| CD | `.github/workflows/cd.yml`: GHCR images, extension release, optional VPS deploy | Pending first `v*` tag run |
+| CI | `.github/workflows/ci.yml` for four components plus a compose smoke job | Green on `main` and `develop` 2026-11-07, including the compose job |
+| CD | `.github/workflows/cd.yml`: GHCR images, extension release, optional VPS deploy | `v0.1.0` published three images and a release with the extension zip |
 
 Exact verified results:
 
@@ -65,10 +65,12 @@ unchanged in behaviour and is exercised by the CI compose job and release builds
 
 ## 2. Known gaps
 
-- CI and CD have not yet run on a remote runner. The compose smoke job builds the real backend
-  Dockerfile, which is the one path this host could not exercise.
 - The CD deploy job is written but has never touched a VPS; `scripts/deploy.sh` was only syntax
-  checked. Set `VPS_*` secrets and `DEPLOY_ENABLED=true` after the first green tag build.
+  checked. Set `VPS_*` secrets, `VPS_APP_DIR`, log the server in to GHCR and set
+  `DEPLOY_ENABLED=true` before relying on it. Release `v0.1.0` proves the image and release jobs.
+- The compose smoke job caught one real bug on its first run (the frontend healthcheck probed
+  `localhost`, which resolves to IPv6 inside the container). The IPv4 probe passed on the next
+  green run and locally.
 - The extension passed unit tests and its API calls were simulated with a `chrome-extension://`
   origin, but it was not loaded into a packaged Chrome profile in this environment.
 - H2 tests use `ddl-auto: create-drop`; they do not validate the Flyway schema. The live MySQL run
@@ -253,7 +255,7 @@ A deployment build is complete when all of the following are true:
 8. All backend, AI, frontend and extension tests pass; CI is green.
 9. `README.md` matches reality.
 
-Status on 2026-11-07: 1 (with the host-jar caveat above), 2, 3, 5, 6, 7 and 8 pass locally; 4 passed as
-an origin-level API simulation, not in a packaged browser; 8 awaits the first remote CI run; 9 is
-current. A release is not done until a `v*` tag produces green CD jobs and, if deploying, `deploy.sh`
-reports the stack healthy on the target host.
+Status on 2026-11-07: 1, 2, 3, 5, 6, 7, 8 and 9 pass; CI is green on `main` and `develop` and CD
+published `v0.1.0`. Point 4 passed as an origin-level API simulation, not in a packaged browser.
+The remaining release step is the optional VPS deploy, which needs the `VPS_*` secrets and a GHCR
+login on the host.
