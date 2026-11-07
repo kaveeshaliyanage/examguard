@@ -2,11 +2,14 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
 
-COPY pom.xml ./
-RUN mvn -B -q dependency:go-offline
+# Keep the dependency cache across builds and fail fast on a stalled connection instead of
+# waiting on Maven's default socket timeouts (the cause of hour-long CI builds on slow links).
+ENV MAVEN_OPTS="-Djava.net.preferIPv4Stack=true -Dmaven.wagon.http.connectionTimeout=20000 -Dmaven.wagon.http.readTimeout=60000"
 
+COPY pom.xml ./
 COPY src ./src
-RUN mvn -B -q -DskipTests package
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q -DskipTests package
 
 # Runtime stage
 FROM eclipse-temurin:21-jre

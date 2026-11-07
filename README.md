@@ -26,8 +26,12 @@ unknown, not clean.
 | `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, isolated payloads |
 | `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query | Complete: staff dashboard, findings review, decisions, audit, student exam flow, autosave, countdown |
 | `extension/` | Chrome MV3, TypeScript | Complete: domain-only observation, persistent queue, batching, backoff, reconnect flow |
+| `ai/app/training/` | scikit-learn, joblib | Complete: synthetic cohort generator, feature export, calibrated pair/incident training, model card, external-corpus adapter |
+| `.github/workflows/` | GitHub Actions | Complete: four test jobs, compose smoke test, GHCR image publishing on tags, optional VPS deploy |
+| `kaggle/` | Kaggle CLI | Complete: private dataset, offline training notebook, model storage |
 
-Tests: 36 backend, 31 AI, 22 frontend, 13 extension.
+Tests: 36 backend, 40 AI, 22 frontend, 13 extension. The AI suite includes a 100-candidate timing
+benchmark and an export/training/inference consistency check.
 
 ## Quick start with Docker
 
@@ -69,6 +73,21 @@ The seeded exam is `DEMO-101` with candidate codes `C001` ... `C008`.
 The extension is optional. Load `extension/dist` as an unpacked extension, connect it with the
 attempt's collector token shown on the student page, and only domains and event times are sent.
 Page content, URLs with paths, keystrokes, screenshots and webcam are never collected.
+
+## Training the models
+
+The rule weights are the default and need no artifacts. To fit the optional learned fusion:
+
+```bash
+cd ai
+python -m app.training.export --out data --pair-cohorts 150 --incident-cohorts 150
+python -m app.training.train  --data data --out models
+```
+
+Then set `USE_LEARNED_FUSION=true`. The models are trained on synthetic cohorts and the published
+score remains a review priority, not a probability of misconduct. Metrics, splits, circularity
+limits and the external-corpus adapter are in [`docs/TRAINING.md`](docs/TRAINING.md); Kaggle
+publishing is documented in [`kaggle/README.md`](kaggle/README.md).
 
 ## Local development (without Docker)
 
@@ -136,8 +155,11 @@ The code is production-shaped, not certified for real graded examinations. Befor
 - Sign and distribute the extension through an organisation policy; pin its ID.
 - Add observability (structured logs, metrics, tracing), backups, retention and deletion jobs.
 - Validate the analysis on held-out cohorts and calibrate or remove any displayed numeric score.
+  Synthetic-cohort metrics are not a substitute for a consented pilot.
 - Provide an appeal path and human oversight. The EU AI Act treats AI that detects prohibited
   behaviour during tests as high-risk; obligations apply to real deployments.
+- Set `SEED_DEMO_DATA=false` and keep the demo accounts out of production.
 
 More detail: [`docs/ETHICS_AND_LIMITS.md`](docs/ETHICS_AND_LIMITS.md),
-[`docs/EVALUATION.md`](docs/EVALUATION.md), [`docs/HANDOFF.md`](docs/HANDOFF.md).
+[`docs/EVALUATION.md`](docs/EVALUATION.md), [`docs/TRAINING.md`](docs/TRAINING.md),
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md), [`docs/HANDOFF.md`](docs/HANDOFF.md).

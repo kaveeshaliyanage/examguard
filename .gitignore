@@ -13,6 +13,12 @@ ai/**/__pycache__/
 ai/.pytest_cache/
 ai/.mypy_cache/
 ai/models/*.joblib
+ai/models/*.meta.json
+ai/models/MODEL_CARD.md
+ai/data/*.jsonl
+ai/data/manifest.json
+ai/data-external/
+ai/build/
 *.pyc
 
 # node
