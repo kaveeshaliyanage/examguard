@@ -22,6 +22,8 @@ services:
       context: ./ai
       args:
         INSTALL_SEMANTIC: ${INSTALL_SEMANTIC:-false}
+    volumes:
+      - ./ai/models:/app/models:ro
     environment:
       SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
       SEMANTIC_MODEL: ${SEMANTIC_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
