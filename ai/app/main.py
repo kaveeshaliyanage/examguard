@@ -8,11 +8,13 @@ from .config import settings
 from .features.semantic import status as semantic_status
 from .schemas import (
     AnalysisResponse,
+    AuthorshipRequest,
+    AuthorshipResponse,
     HealthResponse,
     IncidentAnalysisRequest,
     PairAnalysisRequest,
 )
-from .services.analyzer import analyze_incidents, analyze_pairs
+from .services.analyzer import analyze_authorship, analyze_incidents, analyze_pairs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +24,8 @@ app = FastAPI(
     version="0.1.0",
     description=(
         "Feature extraction and review-priority fusion. Scores are review priorities, "
-        "not probabilities of misconduct. Pair and incident schemas are isolated."
+        "not probabilities of misconduct. Pair, incident and authorship schemas are isolated. "
+        "Authorship stylometry is a review aid and is capped at priority 54 (band MEDIUM)."
     ),
 )
 
@@ -33,6 +36,8 @@ def health() -> HealthResponse:
         status="UP",
         modelVersion=settings.model_version,
         semanticAvailable=semantic_status() == "ready",
+        authorshipAvailable=True,
+        authorshipScoreCap=54.0,
     )
 
 
@@ -41,8 +46,12 @@ def root() -> dict:
     return {
         "service": "examguard-analysis",
         "modelVersion": settings.model_version,
-        "endpoints": ["/health", "/analyze/pairs", "/analyze/incidents"],
+        "endpoints": ["/health", "/analyze/pairs", "/analyze/incidents", "/analyze/authorship"],
         "scoreSemantics": "review priority 0-100, not a probability",
+        "authorshipSemantics": (
+            "stylometric review aid for machine-generated prose; capped at 54 (MEDIUM), "
+            "not proof of AI use or of copying"
+        ),
     }
 
 
@@ -66,3 +75,14 @@ def incidents(request: IncidentAnalysisRequest) -> AnalysisResponse:
         request.modelVersion,
     )
     return analyze_incidents(request)
+
+
+@app.post("/analyze/authorship", response_model=AuthorshipResponse)
+def authorship(request: AuthorshipRequest) -> AuthorshipResponse:
+    logger.info(
+        "authorship analysis exam=%s candidates=%s mode=%s",
+        request.examId,
+        len(request.candidates),
+        request.modelVersion,
+    )
+    return analyze_authorship(request)
