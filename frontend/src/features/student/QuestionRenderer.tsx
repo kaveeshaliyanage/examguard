@@ -10,6 +10,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import type { ExamQuestion, QuestionOption } from '../../api/types';
+import { CodeEditor } from '../../components/CodeEditor';
 
 export interface QuestionAnswerValue {
   text: string;
@@ -167,6 +168,22 @@ export function QuestionRenderer({ question, value, disabled = false, onChange }
           placeholder="Type a short answer. It saves automatically."
           inputProps={{ 'aria-label': `Answer for question ${question.orderIndex}` }}
         />
+      );
+    case 'CODE':
+      return (
+        <Stack spacing={0.75}>
+          <CodeEditor
+            value={value.text}
+            language={question.content?.language}
+            disabled={disabled}
+            label={`Your solution for question ${question.orderIndex}`}
+            onChange={(text) => onChange({ text, selectedOptions: [] })}
+          />
+          <Typography variant="caption" color="text.secondary">
+            Your code is stored exactly as typed and autosaves. It runs against the question&apos;s
+            test cases when you submit.
+          </Typography>
+        </Stack>
       );
     case 'ESSAY':
     default: {

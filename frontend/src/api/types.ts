@@ -6,7 +6,9 @@ export type QuestionType =
   | 'MULTI_CHOICE'
   | 'TRUE_FALSE'
   | 'SHORT_ANSWER'
-  | 'ESSAY';
+  | 'ESSAY'
+  | 'CODE';
+export type CodeLanguage = 'PYTHON' | 'JAVASCRIPT' | 'JAVA';
 export type GradingMode = 'AUTO' | 'MANUAL';
 export type IntegritySignal = 'FOCUS_LOSS' | 'FOCUS_RETURN';
 export type FindingType = 'CANDIDATE_PAIR' | 'CANDIDATE_INCIDENT' | 'CANDIDATE_AUTHORSHIP';
@@ -57,6 +59,30 @@ export interface QuestionOption {
 
 export interface QuestionContent {
   options?: QuestionOption[];
+  language?: CodeLanguage;
+  starterCode?: string | null;
+}
+
+export interface CodeTest {
+  name?: string | null;
+  input?: string | null;
+  expectedOutput: string;
+  hidden?: boolean;
+}
+
+export interface CodeTestResult {
+  name: string;
+  passed: boolean;
+  status: string;
+  hidden: boolean;
+  durationMs: number;
+}
+
+export interface CodeGradeDetail {
+  language: CodeLanguage;
+  passed: number;
+  total: number;
+  tests: CodeTestResult[];
 }
 
 export interface AnswerKey {
@@ -64,6 +90,7 @@ export interface AnswerKey {
   acceptedAnswers?: string[];
   modelAnswer?: string | null;
   rubric?: string | null;
+  tests?: CodeTest[];
 }
 
 export interface ExamQuestion {
@@ -177,6 +204,21 @@ export interface FindingSummary {
   coverageWarning: boolean;
   evidenceCount: number;
   createdAt: string;
+}
+
+export interface FindingOverviewRow {
+  id: number;
+  type: FindingType;
+  priorityScore: number;
+  priorityBand: PriorityBand;
+  status: FindingStatus;
+  candidateA: string;
+  candidateB: string | null;
+  summary: string;
+  coverageWarning: boolean;
+  evidenceCount: number;
+  createdAt: string;
+  exam: { id: number; code: string; title: string };
 }
 
 export interface AnalysisRun {
@@ -416,6 +458,8 @@ export interface ReportQuestion {
   selectedOptions: string[];
   correctKeys: string[] | null;
   explanation: string | null;
+  codeLanguage?: CodeLanguage | null;
+  codeDetail?: CodeGradeDetail | null;
 }
 
 export interface ReportIntegrityEvent {
@@ -593,6 +637,12 @@ export interface GradingRow {
   explanation: string | null;
   awardedPoints: number | null;
   comment: string | null;
+  detail?: CodeGradeDetail | null;
+}
+
+export interface CodeJudgeSummary {
+  attemptsJudged: number;
+  questionsJudged: number;
 }
 
 export interface GradeResponse {

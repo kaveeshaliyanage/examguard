@@ -242,6 +242,7 @@ const resultColumns: DataTableColumn<StudentAttemptSummary>[] = [
 
 export function StudentDashboardPage() {
   const { session } = useStudentAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const attemptsQuery = useStudentDashboard(session?.token);
   const [examCode, setExamCode] = useState('');
@@ -453,7 +454,15 @@ export function StudentDashboardPage() {
               emptyTitle="No results yet"
               emptyBody="Submitted attempts and released marks will appear here after your exams."
               getRowId={(row) => String(row.attemptId)}
-              onRowClick={(row) => navigate(`/attempt/${row.attemptId}/report`)}
+              onRowClick={(row) => {
+                if (!row.released) {
+                  showToast('Marks are not released yet. Your lecturer will publish them after marking.', {
+                    severity: 'info',
+                  });
+                  return;
+                }
+                navigate(`/attempt/${row.attemptId}/report`);
+              }}
               initialState={{ pageSize: 10 }}
             />
           )}

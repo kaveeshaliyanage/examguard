@@ -2,7 +2,6 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -15,10 +14,12 @@ import { downloadAttemptReportPdf, fetchAttemptReport } from '../../api/studentA
 import { ApiError } from '../../api/client';
 import type { AttemptReport, ReportQuestion } from '../../api/types';
 import { readAttemptSession, readStudentSession } from '../../auth/storage';
-import { BandChip } from '../../components/BandChip';
+import { CodeBlock } from '../../components/CodeEditor';
+import { CodeTestResults } from '../../components/CodeTestResults';
 import { LoadingBlock } from '../../components/LoadingBlock';
 import { useToast } from '../../components/ToastProvider';
-import { integrityTones, priorityBands } from '../../design/tokens';
+import { integrityTones } from '../../design/tokens';
+import { saveBlob } from '../../lib/download';
 import { formatDateTime, humanize } from '../../lib/format';
 import { StudentShell } from './StudentShell';
 
@@ -83,17 +84,30 @@ function QuestionResult({ question, index }: { question: ReportQuestion; index: 
         <Typography variant="body1" sx={{ fontWeight: 600 }}>
           {question.prompt}
         </Typography>
-        <Box>
-          <Typography variant="caption" color="text.secondary">
-            Your answer
-          </Typography>
-          <Typography
-            variant="body2"
-            sx={{ whiteSpace: 'pre-wrap', color: question.answerText ? 'text.primary' : 'text.secondary' }}
-          >
-            {question.answerText || 'No answer submitted'}
-          </Typography>
-        </Box>
+        {question.type === 'CODE' ? (
+          question.answerText.trim() ? (
+            <CodeBlock code={question.answerText} language={question.codeLanguage} label="Your solution" />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No answer submitted
+            </Typography>
+          )
+        ) : (
+          <Box>
+            <Typography variant="caption" color="text.secondary">
+              Your answer
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ whiteSpace: 'pre-wrap', color: question.answerText ? 'text.primary' : 'text.secondary' }}
+            >
+              {question.answerText || 'No answer submitted'}
+            </Typography>
+          </Box>
+        )}
+        {question.codeDetail ? (
+          <CodeTestResults detail={question.codeDetail} title="Test results" />
+        ) : null}
         {correct ? (
           <Box>
             <Typography variant="caption" color="text.secondary">
@@ -209,14 +223,7 @@ export function StudentReportPage() {
     setDownloading(true);
     try {
       const blob = await downloadAttemptReportPdf(id, token);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `examguard-report-${id}.pdf`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      saveBlob(blob, `examguard-report-${id}.pdf`);
       showToast('PDF report downloaded.', { severity: 'success' });
     } catch (caught) {
       showToast(
@@ -253,7 +260,6 @@ export function StudentReportPage() {
     );
   }
 
-  const bandTone = priorityBands;
   const released = report.released;
   const homePath = studentSession ? '/student' : `/attempt/${id}/submitted`;
 
@@ -357,59 +363,6 @@ export function StudentReportPage() {
         </Box>
 
         <IntegrityTimeline report={report} />
-
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Stack spacing={1.5}>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-              <Typography variant="subtitle1" component="h5">Review signals</Typography>
-              <Chip
-                size="small"
-                color="warning"
-                variant="outlined"
-                label="Review aid, not proof"
-                aria-label="Review aid, not proof of misconduct"
-              />
-            </Stack>
-            {report.reviewSignals.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No AI or overlap signals were produced for this attempt.
-              </Typography>
-            ) : (
-              <Stack spacing={1}>
-                {report.reviewSignals.map((signal, index) => (
-                  <Stack
-                    key={`${signal.kind}-${index}`}
-                    direction="row"
-                    spacing={1.5}
-                    alignItems="center"
-                    flexWrap="wrap"
-                    useFlexGap
-                    sx={{
-                      p: 1.25,
-                      borderRadius: 1,
-                      bgcolor: bandTone[signal.band].soft,
-                      border: `1px solid ${bandTone[signal.band].border}`,
-                    }}
-                  >
-                    <BandChip band={signal.band} />
-                    <Typography variant="body2" sx={{ fontWeight: 600, flex: 1 }}>
-                      {signal.label}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Score {Math.round(signal.score)}
-                    </Typography>
-                    <Chip size="small" variant="outlined" label="Review aid, not proof" />
-                  </Stack>
-                ))}
-              </Stack>
-            )}
-            <Divider />
-            <Typography variant="caption" color="text.secondary">
-              Overlap and AI signals are probabilistic review aids. They are never proof of misconduct;
-              a person reviews the evidence before any action is taken.
-            </Typography>
-          </Stack>
-        </Paper>
       </Stack>
     </StudentShell>
   );

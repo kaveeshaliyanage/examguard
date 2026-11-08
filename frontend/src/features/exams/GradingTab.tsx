@@ -14,13 +14,17 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ReplayIcon from '@mui/icons-material/Replay';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../api/client';
-import { useGradeAnswer, useGradingQueue, useReleaseGrades } from '../../api/dashboardApi';
+import { useGradeAnswer, useGradingQueue, useJudgeCode, useReleaseGrades } from '../../api/dashboardApi';
 import type { ExamDetail, GradingRow } from '../../api/types';
+import { CodeBlock } from '../../components/CodeEditor';
+import { CodeTestResults } from '../../components/CodeTestResults';
 import { EmptyState } from '../../components/EmptyState';
 import { LoadingBlock } from '../../components/LoadingBlock';
 import { useToast } from '../../components/ToastProvider';
+import { monoFontFamily } from '../../design/tokens';
 import { QUESTION_TYPE_LABELS } from './QuestionFields';
 
 interface GradingTabProps {
@@ -67,7 +71,38 @@ function keyText(row: GradingRow): string {
   if (key.acceptedAnswers?.length) {
     return `Accepted: ${key.acceptedAnswers.join(' · ')}`;
   }
+  if (row.type === 'CODE') {
+    const tests = key.tests ?? [];
+    return tests.length > 0 ? `${tests.length} test case(s)` : 'Manual marking';
+  }
   return [key.modelAnswer, key.rubric].filter(Boolean).join('\n\n') || 'Marked by rubric';
+}
+
+function CodeTests({ row }: { row: GradingRow }) {
+  const tests = row.answerKey?.tests ?? [];
+  return (
+    <Stack spacing={1}>
+      <Typography variant="caption" color="text.secondary">
+        {tests.length > 0
+          ? 'Test cases the judge runs. Expected output is never shown to the candidate.'
+          : 'No test cases were set, so this answer has to be marked by hand.'}
+      </Typography>
+      {tests.map((test, index) => (
+        <Box
+          key={`${test.name ?? 'case'}-${index}`}
+          sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover', fontFamily: monoFontFamily, fontSize: 12 }}
+        >
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
+            {test.name || `Case ${index + 1}`}
+            {test.hidden ? ' · hidden' : ''}
+          </Typography>
+          <Box sx={{ whiteSpace: 'pre-wrap' }}>
+            {`in: ${test.input?.trim() ? test.input : '(empty)'}\nout: ${test.expectedOutput}`}
+          </Box>
+        </Box>
+      ))}
+    </Stack>
+  );
 }
 
 function GradeCard({ row, examId }: { row: GradingRow; examId: number }) {
@@ -113,26 +148,38 @@ function GradeCard({ row, examId }: { row: GradingRow; examId: number }) {
           </Typography>
         </Stack>
         <Typography sx={{ fontWeight: 600 }}>{row.prompt}</Typography>
-        <Box
-          sx={{
-            p: 1.5,
-            borderRadius: 1,
-            bgcolor: 'action.hover',
-            whiteSpace: 'pre-wrap',
-            minHeight: 48,
-            fontFamily: row.text ? 'inherit' : undefined,
-            color: answerText ? 'text.primary' : 'text.secondary',
-          }}
-        >
-          {answerText || 'The candidate left this blank.'}
-        </Box>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 13 }}
-        >
-          {keyText(row)}
-        </Typography>
+        {row.type === 'CODE' ? (
+          row.text.trim() ? (
+            <CodeBlock code={row.text} label="Submitted code" />
+          ) : (
+            <Alert severity="info">The candidate left this blank.</Alert>
+          )
+        ) : (
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              whiteSpace: 'pre-wrap',
+              minHeight: 48,
+              color: answerText ? 'text.primary' : 'text.secondary',
+            }}
+          >
+            {answerText || 'The candidate left this blank.'}
+          </Box>
+        )}
+        {row.type === 'CODE' ? (
+          <CodeTests row={row} />
+        ) : (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 13 }}
+          >
+            {keyText(row)}
+          </Typography>
+        )}
+        {row.detail ? <CodeTestResults detail={row.detail} /> : null}
         {error ? <Alert severity="error">{error}</Alert> : null}
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'flex-start' }}>
           <TextField
@@ -164,7 +211,13 @@ export function GradingTab({ exam, canReview }: GradingTabProps) {
   const { showToast } = useToast();
   const queue = useGradingQueue(exam.id);
   const release = useReleaseGrades(exam.id);
+  const judge = useJudgeCode(exam.id);
   const [selected, setSelected] = useState<number | null>(null);
+
+  const hasCode = useMemo(
+    () => (queue.data ?? []).some((row) => row.type === 'CODE'),
+    [queue.data],
+  );
 
   const groups = useMemo(() => groupRows(queue.data ?? []), [queue.data]);
   const pendingTotal = groups.reduce((sum, group) => sum + group.pending, 0);
@@ -243,6 +296,30 @@ export function GradingTab({ exam, canReview }: GradingTabProps) {
           </Typography>
         </Box>
         <Chip label={`${manualRows.length} of ${queue.data?.length ?? 0} ungraded`} />
+        {canReview && hasCode ? (
+          <Button
+            variant="outlined"
+            startIcon={<ReplayIcon />}
+            disabled={judge.isPending}
+            title="Re-runs the hidden tests for every coding answer. Hand-marked scores are kept."
+            onClick={() =>
+              judge.mutate(undefined, {
+                onSuccess: (result) =>
+                  showToast(
+                    `Re-ran code judging: ${result.questionsJudged} answer(s) in ${result.attemptsJudged} attempt(s).`,
+                    { severity: 'success' },
+                  ),
+                onError: (caught) =>
+                  showToast(
+                    caught instanceof ApiError ? caught.message : 'Code judging could not be re-run.',
+                    { severity: 'error' },
+                  ),
+              })
+            }
+          >
+            {judge.isPending ? 'Judging…' : 'Re-run code judging'}
+          </Button>
+        ) : null}
         {canReview ? (
           <Button
             variant="contained"

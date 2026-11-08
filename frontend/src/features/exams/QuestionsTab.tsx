@@ -28,7 +28,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { useToast } from '../../components/ToastProvider';
 import { QuestionRenderer } from '../student/QuestionRenderer';
 import type { QuestionAnswerValue } from '../student/QuestionRenderer';
-import { QuestionFields, QUESTION_TYPE_LABELS, emptyQuestion, isAutoGraded, validateQuestion } from './QuestionFields';
+import { QuestionFields, QUESTION_TYPE_LABELS, emptyQuestion, isAutoMarked, validateQuestion } from './QuestionFields';
 
 interface QuestionsTabProps {
   exam: ExamDetail;
@@ -59,6 +59,10 @@ function keySummary(question: ExamQuestion): string {
   if (question.type === 'SHORT_ANSWER') {
     const accepted = question.answerKey?.acceptedAnswers ?? [];
     return accepted.length > 0 ? accepted.join(', ') : 'No accepted answers';
+  }
+  if (question.type === 'CODE') {
+    const tests = question.answerKey?.tests ?? [];
+    return tests.length > 0 ? `${tests.length} test case${tests.length === 1 ? '' : 's'}` : 'Manual marking';
   }
   return question.answerKey?.rubric ? 'Rubric set' : 'Manual marking';
 }
@@ -157,7 +161,7 @@ export function QuestionsTab({ exam, canManage }: QuestionsTabProps) {
       <Stack spacing={2}>
         <EmptyState
           title="No questions yet"
-          body="Add single choice, multiple choice, true/false, short answer or essay questions."
+          body="Add single choice, multiple choice, true/false, short answer, essay or coding questions."
         />
         {canManage ? (
           <Stack direction="row" justifyContent="center">
@@ -203,7 +207,14 @@ export function QuestionsTab({ exam, canManage }: QuestionsTabProps) {
                 value={preview ? 'preview' : 'edit'}
                 onChange={(_, value: 'edit' | 'preview' | null) => {
                   if (value) {
-                    setPreview(value === 'preview');
+                    const showing = value === 'preview';
+                    if (showing && draft.type === 'CODE' && previewAnswer.text === '') {
+                      setPreviewAnswer({
+                        text: draft.content?.starterCode ?? '',
+                        selectedOptions: [],
+                      });
+                    }
+                    setPreview(showing);
                   }
                 }}
                 aria-label="Question preview"
@@ -275,8 +286,8 @@ export function QuestionsTab({ exam, canManage }: QuestionsTabProps) {
                 <Chip
                   size="small"
                   variant="outlined"
-                  color={isAutoGraded(question.type) ? 'success' : 'default'}
-                  label={isAutoGraded(question.type) ? 'Auto-marked' : 'Manual marking'}
+                  color={isAutoMarked(question) ? 'success' : 'default'}
+                  label={isAutoMarked(question) ? 'Auto-marked' : 'Manual marking'}
                 />
                 <Chip size="small" variant="outlined" label={`Key: ${keySummary(question)}`} />
               </Stack>

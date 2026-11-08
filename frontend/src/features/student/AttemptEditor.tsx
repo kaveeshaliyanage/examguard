@@ -59,7 +59,7 @@ function withEveryQuestion(questions: ExamQuestion[], answers: AnswerView[]): An
     (question) =>
       byId.get(question.id) ?? {
         questionId: question.id,
-        text: '',
+        text: question.type === 'CODE' ? question.content?.starterCode ?? '' : '',
         selectedOptions: [],
         revisionNo: 0,
         savedAt: null,

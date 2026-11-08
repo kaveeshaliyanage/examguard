@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { isArrayOf, isExamList, isFindingDetail, isRecord, request } from './client';
+import { API_BASE, ApiError, isArrayOf, isExamList, isFindingDetail, isRecord, request } from './client';
 import type {
   AnalysisRun,
   AuditEntry,
@@ -12,10 +12,14 @@ import type {
   ExamStatus,
   ExamSummary,
   FindingDetail,
+  FindingOverviewRow,
+  FindingStatus,
   FindingSummary,
+  FindingType,
   AttemptSummary,
   PermissionLevel,
   PermissionView,
+  PriorityBand,
   RosterEntry,
   UpdateExamInput,
 } from './types';
@@ -78,6 +82,70 @@ export function useExamFindings(
         validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.id === 'number'),
       }),
   });
+}
+
+/** Cross-exam review queue: admins see everything, lecturers only exams they can view. */
+export function useOverviewFindings(filters: {
+  examId?: number;
+  type?: FindingType;
+  status?: FindingStatus;
+  band?: PriorityBand;
+}) {
+  const params = new URLSearchParams();
+  if (filters.examId) {
+    params.set('examId', String(filters.examId));
+  }
+  if (filters.type) {
+    params.set('type', filters.type);
+  }
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+  if (filters.band) {
+    params.set('band', filters.band);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return useQuery({
+    queryKey: [
+      'findings',
+      'overview',
+      filters.examId ?? 'ALL',
+      filters.type ?? 'ALL',
+      filters.status ?? 'ALL',
+      filters.band ?? 'ALL',
+    ],
+    queryFn: () =>
+      staffRequest<FindingOverviewRow[]>(`/findings${suffix}`, {
+        validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.id === 'number'),
+      }),
+  });
+}
+
+export type ExamReportFormat = 'pdf' | 'csv';
+
+async function fetchReport(path: string, label: string): Promise<Blob> {
+  const token = staffToken();
+  if (!token) {
+    throw new ApiError(401, 'Sign in again to download the report.', path);
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new ApiError(0, 'Network unavailable. The report could not be downloaded.', path, 'network');
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `${label} could not be downloaded.`, path);
+  }
+  return response.blob();
+}
+
+export function downloadExamReport(examId: number, format: ExamReportFormat): Promise<Blob> {
+  return fetchReport(`/reports/exams/${examId}/${format}`, 'The exam report');
+}
+
+export function downloadAdminOverviewPdf(): Promise<Blob> {
+  return fetchReport('/reports/admin/overview/pdf', 'The administration report');
 }
 
 export function useFinding(findingId: number | undefined) {

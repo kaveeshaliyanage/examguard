@@ -3,6 +3,7 @@ import { isArrayOf, isRecord, request } from './client';
 import { readStaffSession } from '../auth/storage';
 import type {
   AdminDashboardData,
+  CodeJudgeSummary,
   GradeResponse,
   GradingRow,
   LecturerDashboardData,
@@ -70,6 +71,17 @@ export function useGradeAnswer(examId: number) {
         method: 'PUT',
         body: { awardedPoints: input.awardedPoints, comment: input.comment ?? null },
       }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['grading', examId] });
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
+export function useJudgeCode(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => staffRequest<CodeJudgeSummary>(`/exams/${examId}/code-judge`, { method: 'POST' }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['grading', examId] });
       void queryClient.invalidateQueries({ queryKey: ['exam', examId] });

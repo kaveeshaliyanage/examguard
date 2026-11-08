@@ -4,6 +4,7 @@ import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
@@ -17,7 +18,8 @@ import AddIcon from '@mui/icons-material/Add';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import type { AnswerKey, CreateQuestionInput, QuestionOption, QuestionType } from '../../api/types';
+import type { AnswerKey, CodeLanguage, CodeTest, CreateQuestionInput, QuestionOption, QuestionType } from '../../api/types';
+import { CodeEditor, CODE_LANGUAGE_LABELS } from '../../components/CodeEditor';
 
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
@@ -27,10 +29,22 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   TRUE_FALSE: 'True / false',
   SHORT_ANSWER: 'Short answer',
   ESSAY: 'Essay',
+  CODE: 'Coding',
 };
 
 export function isAutoGraded(type: QuestionType): boolean {
   return type === 'SINGLE_CHOICE' || type === 'MULTI_CHOICE' || type === 'TRUE_FALSE';
+}
+
+/** Coding questions are auto-marked only while they have test cases. */
+export function isAutoMarked(question: {
+  type: QuestionType;
+  answerKey?: AnswerKey | null;
+}): boolean {
+  if (question.type === 'CODE') {
+    return (question.answerKey?.tests ?? []).some((test) => test.expectedOutput.trim().length > 0);
+  }
+  return isAutoGraded(question.type);
 }
 
 export function emptyQuestion(type: QuestionType = 'ESSAY'): CreateQuestionInput {
@@ -69,6 +83,17 @@ export function emptyQuestion(type: QuestionType = 'ESSAY'): CreateQuestionInput
       maxWords: 50,
       content: {},
       answerKey: { acceptedAnswers: [] },
+      explanation: '',
+    };
+  }
+  if (type === 'CODE') {
+    return {
+      prompt: '',
+      type,
+      points: 10,
+      maxWords: 0,
+      content: { language: 'PYTHON', starterCode: '' },
+      answerKey: { tests: [], modelAnswer: '' },
       explanation: '',
     };
   }
@@ -119,6 +144,19 @@ export function validateQuestion(question: CreateQuestionInput, index: number): 
   if (question.type === 'SHORT_ANSWER' || question.type === 'ESSAY') {
     if (!Number.isInteger(question.maxWords) || question.maxWords < 1) {
       return `${label} needs a word limit of at least 1.`;
+    }
+  }
+  if (question.type === 'CODE') {
+    if (!question.content?.language) {
+      return `${label} needs a programming language.`;
+    }
+    const tests = question.answerKey?.tests ?? [];
+    if (tests.some((test) => !test.expectedOutput.trim())) {
+      return `${label} has a test case without expected output.`;
+    }
+    const usable = tests.filter((test) => test.expectedOutput.trim());
+    if (usable.length === 0 && !(question.answerKey?.modelAnswer ?? '').trim()) {
+      return `${label} needs at least one test case, or a reference solution for manual marking.`;
     }
   }
   return null;
@@ -238,6 +276,51 @@ function OptionEditor({
   );
 }
 
+function CodeContentEditor({
+  question,
+  onChange,
+}: {
+  question: CreateQuestionInput;
+  onChange: (next: CreateQuestionInput) => void;
+}) {
+  const language = question.content?.language ?? 'PYTHON';
+  return (
+    <Stack spacing={1.5}>
+      <FormControl size="small" sx={{ maxWidth: 220 }}>
+        <InputLabel id={`language-${question.prompt.length}-label`}>Language</InputLabel>
+        <Select
+          labelId={`language-${question.prompt.length}-label`}
+          label="Language"
+          value={language}
+          onChange={(event) =>
+            onChange({
+              ...question,
+              content: { ...(question.content ?? {}), language: event.target.value as CodeLanguage },
+            })
+          }
+        >
+          {(Object.keys(CODE_LANGUAGE_LABELS) as CodeLanguage[]).map((key) => (
+            <MenuItem key={key} value={key}>
+              {CODE_LANGUAGE_LABELS[key]}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <CodeEditor
+        label="Starter code (shown to candidates)"
+        language={language}
+        value={question.content?.starterCode ?? ''}
+        onChange={(starterCode) =>
+          onChange({
+            ...question,
+            content: { ...(question.content ?? {}), language, starterCode },
+          })
+        }
+      />
+    </Stack>
+  );
+}
+
 function AnswerKeyEditor({
   question,
   onChange,
@@ -247,6 +330,102 @@ function AnswerKeyEditor({
 }) {
   const patchKey = (patch: Partial<AnswerKey>) =>
     onChange({ ...question, answerKey: { ...(question.answerKey ?? {}), ...patch } });
+
+  if (question.type === 'CODE') {
+    const tests = question.answerKey?.tests ?? [];
+    const setTests = (next: CodeTest[]) => patchKey({ tests: next });
+    const updateTest = (index: number, patch: Partial<CodeTest>) =>
+      setTests(tests.map((test, i) => (i === index ? { ...test, ...patch } : test)));
+    return (
+      <Stack spacing={1.5}>
+        <Typography variant="caption" color="text.secondary">
+          Test cases run against every submission. Expected output is compared after trimming trailing
+          whitespace; candidates never see the cases, the inputs or the reference solution.
+        </Typography>
+        {tests.map((test, index) => (
+          <Box
+            key={index}
+            sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}
+          >
+            <Stack spacing={1}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <TextField
+                  label="Case name"
+                  size="small"
+                  value={test.name ?? ''}
+                  onChange={(event) => updateTest(index, { name: event.target.value })}
+                  sx={{ width: 200 }}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={Boolean(test.hidden)}
+                      onChange={(event) => updateTest(index, { hidden: event.target.checked })}
+                    />
+                  }
+                  label="Hide from the candidate report"
+                />
+                <Box sx={{ flexGrow: 1 }} />
+                <IconButton
+                  aria-label={`Remove test case ${index + 1}`}
+                  onClick={() => setTests(tests.filter((_, i) => i !== index))}
+                  size="small"
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+              <TextField
+                label="Standard input"
+                value={test.input ?? ''}
+                onChange={(event) => updateTest(index, { input: event.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+                size="small"
+                inputProps={{ 'aria-label': `Test case ${index + 1} input` }}
+              />
+              <TextField
+                label="Expected output"
+                value={test.expectedOutput}
+                onChange={(event) => updateTest(index, { expectedOutput: event.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+                size="small"
+                required
+                inputProps={{ 'aria-label': `Test case ${index + 1} expected output` }}
+              />
+            </Stack>
+          </Box>
+        ))}
+        <Box>
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            disabled={tests.length >= 20}
+            onClick={() =>
+              setTests([
+                ...tests,
+                { name: `Case ${tests.length + 1}`, input: '', expectedOutput: '', hidden: false },
+              ])
+            }
+          >
+            Add test case
+          </Button>
+        </Box>
+        <CodeEditor
+          label="Reference solution (marking aid, never shown to candidates)"
+          language={question.content?.language}
+          value={question.answerKey?.modelAnswer ?? ''}
+          onChange={(modelAnswer) => patchKey({ modelAnswer })}
+        />
+        <Typography variant="caption" color="text.secondary">
+          Correct solutions often look alike, so code answers are never compared between candidates for
+          similarity or authorship. Focus-loss signals still apply.
+        </Typography>
+      </Stack>
+    );
+  }
 
   if (question.type === 'TRUE_FALSE') {
     const selected = question.answerKey?.selectedKeys?.[0] ?? 'TRUE';
@@ -343,7 +522,8 @@ export function QuestionFields({
           <Typography variant="h6">Questions</Typography>
           <Typography variant="body2" color="text.secondary">
             Choice and true/false questions are marked automatically. Short answers are matched against
-            the accepted list; essays go to the manual queue.
+            the accepted list; coding questions run against their test cases; essays go to the manual
+            queue.
           </Typography>
         </Box>
         {allowAdd ? (
@@ -438,8 +618,8 @@ export function QuestionFields({
                 <Chip
                   size="small"
                   variant="outlined"
-                  color={isAutoGraded(question.type) ? 'success' : 'default'}
-                  label={isAutoGraded(question.type) ? 'Auto-marked' : 'Manual marking'}
+                  color={isAutoMarked(question) ? 'success' : 'default'}
+                  label={isAutoMarked(question) ? 'Auto-marked' : 'Manual marking'}
                 />
               </Stack>
 
@@ -457,6 +637,10 @@ export function QuestionFields({
 
               {question.type === 'SINGLE_CHOICE' || question.type === 'MULTI_CHOICE' ? (
                 <OptionEditor question={question} onChange={(next) => update(index, next)} />
+              ) : null}
+
+              {question.type === 'CODE' ? (
+                <CodeContentEditor question={question} onChange={(next) => update(index, next)} />
               ) : null}
 
               <AnswerKeyEditor question={question} onChange={(next) => update(index, next)} />
