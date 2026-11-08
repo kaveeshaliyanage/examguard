@@ -11,4 +11,6 @@ public interface AnalysisRunRepository extends JpaRepository<AnalysisRun, Long> 
     List<AnalysisRun> findByExamIdOrderByStartedAtDesc(Long examId);
 
     List<AnalysisRun> findByExamIdAndStatusIn(Long examId, Collection<AnalysisStatus> statuses);
+
+    List<AnalysisRun> findTop10ByOrderByStartedAtDesc();
 }

@@ -47,6 +47,12 @@ public class Exam {
     @Column(name = "allow_extension", nullable = false)
     private boolean allowExtension = true;
 
+    @Column(name = "max_strikes", nullable = false)
+    private Integer maxStrikes = 3;
+
+    @Column(columnDefinition = "text")
+    private String instructions;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -57,6 +63,9 @@ public class Exam {
         }
         if (status == null) {
             status = ExamStatus.DRAFT;
+        }
+        if (maxStrikes == null) {
+            maxStrikes = 3;
         }
     }
 }
