@@ -9,6 +9,7 @@ repowiki:
     - text: "Flyway DDL is per-vendor under db/migration/mysql and db/migration/postgresql; db/migration/common holds portable data-only migrations."
     - text: "The Chrome extension cannot block tabs or detect other applications. Focus-loss strikes are recorded signals, not enforcement; describe them that way."
     - text: "Exam schedule blocks new joins outside opens_at/closes_at; in-progress attempts may resume. A non-empty roster restricts joins to enrolled accounts; guests are rejected."
+    - text: "Coding questions (PYTHON, JAVASCRIPT, JAVA) are judged by hidden tests in the isolated runner/ container with partial credit per passing test. Code answers are excluded from cross-candidate similarity and authorship because identical correct solutions are expected; incident payloads still carry them."
   documents:
     - title: "ExamGuard overview"
       goal: "What the system does, the two review outputs (pair similarity and candidate incident), the score semantics, and the isolation rule."
@@ -18,7 +19,7 @@ repowiki:
       hints: "backend/src/main/java/com/examguard/exam, attempt, domain; frontend/src/features/student."
     - title: "Grading and results"
       goal: "Auto-grading rules per question type, manual grading queue, and the result-release gate."
-      hints: "AutoGradingService, GradeService, answer_grade table, release endpoints."
+      hints: "backend/src/main/java/com/examguard/grading, backend/src/main/java/com/examguard/judge (CodeJudgeService, CodeRunnerClient), runner/app (sandbox), answer_grade table with detail_json (V4), release endpoints. Coding questions are marked by hidden tests with partial credit; a runner outage leaves answers ungraded, never zero."
     - title: "Integrity detection"
       goal: "How pair similarity, activity incidents, and the authorship classifier combine into priority scores, including caps and their limits."
       hints: "ai/app analysis and fusion modules, analysis client, evidence_item, model caps."
@@ -48,4 +49,5 @@ knowledgecard:
     - text: "Treat priorityScore as review priority, never as a probability of cheating; keep this framing in every module description."
     - text: "The pair/incident payload isolation rule is a hard architectural constraint, not a convention."
     - text: "Learned fusion artifacts are optional: without ai/models artifacts the rule weights are used, so never document learned scoring as always-on."
+    - text: "Coding questions are auto-judged by hidden tests in the sandboxed runner (partial credit per test). Never compare code answers between candidates for similarity or authorship; incident payloads still include them."
     - text: "Exam schedule blocks new joins outside opens_at/closes_at; in-progress attempts may resume. A non-empty roster restricts joins to enrolled accounts; guests are rejected."

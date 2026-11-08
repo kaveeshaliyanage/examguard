@@ -76,7 +76,9 @@ Same shape as the join response minus the token.
 { "questionId": 1, "revisionNo": 4, "savedAt": "...", "wordCount": 41 }
 ```
 Creates an immutable revision. `clientSeq` protects against out-of-order retries: a sequence lower
-than the last accepted one is ignored and the current revision is returned.
+than the last accepted one is ignored and the current revision is returned. Prose is
+whitespace-collapsed; text on `CODE` questions is kept byte for byte (only CRLF/CR becomes LF) because
+indentation and line breaks are part of the answer.
 
 ### `POST /attempts/{attemptId}/submit`
 ```json
@@ -85,6 +87,9 @@ than the last accepted one is ignored and the current revision is returned.
 ```json
 { "attemptId": 1, "status": "SUBMITTED", "submittedAt": "..." }
 ```
+Submission is idempotent. After committing, automatic coding questions are judged in the sandbox; a
+runner outage never fails the submission and never awards zero — the answer stays ungraded until a
+re-run.
 
 ### `POST /attempts/{attemptId}/events`
 ```json
@@ -199,6 +204,60 @@ Allowed: `DRAFT`, `OPEN`, `CLOSED`, `ANALYSED` (the last is set by the analysis 
     "coverageWarning": false, "lateSubmission": false } ]
 ```
 
+### `POST /exams/{id}/questions`
+Creates one question (`PUT /exams/{id}/questions/{questionId}` updates, `DELETE` removes). Owner only.
+Types: `SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`, `CODE`.
+```json
+{
+  "prompt": "Read two integers and print their sum",
+  "type": "CODE",
+  "points": 10,
+  "maxWords": 0,
+  "content": { "language": "PYTHON", "starterCode": "a, b = map(int, input().split())\n" },
+  "answerKey": {
+    "tests": [
+      { "name": "basic", "input": "1 2\n", "expectedOutput": "3\n" },
+      { "name": "edge", "input": "-1 1\n", "expectedOutput": "0\n", "hidden": true }
+    ]
+  },
+  "explanation": "Sum the two integers line by line."
+}
+```
+`content` and `answerKey` stay staff-only for `CODE`: candidates receive just `language` and
+`starterCode`. A coding question with at least one usable test case is stored with
+`gradingMode: "AUTO"`; without tests it needs a reference solution or rubric and stays `MANUAL`.
+At most 20 test cases, each requiring an expected output.
+
+Coding answers are deliberately excluded from the cross-candidate pair and authorship payloads:
+two correct solutions naturally look alike, so comparing them would manufacture collusion signals.
+Incident payloads still carry every answer. Focus-loss and navigation signals are unaffected.
+
+### `POST /exams/{id}/code-judge`
+Re-runs the sandbox for every `AUTO` coding answer on submitted attempts. Owner only.
+```json
+{ "attemptsJudged": 2, "questionsJudged": 5 }
+```
+Partial credit is `points × passed / total` (2 decimals, HALF_UP); a compile error scores 0 with a
+`COMPILE_ERROR` detail. `MANUAL` grades are never overwritten.
+
+### `GET /exams/{id}/grading`
+One row per submitted attempt and question: answer text, revision, answer key, awarded points,
+comment, and for coding answers a `detail` with `{ language, passed, total, tests: [{ name, passed,
+status, hidden, durationMs }] }`.
+
+### `PUT /attempts/{attemptId}/answers/{questionId}/grade`
+```json
+{ "awardedPoints": 3.00, "comment": "Part marks for the approach" }
+```
+Reviewer or owner. Marks the grade `MANUAL` and writes `ANSWER_GRADED`.
+
+### `POST /exams/{id}/grades/release`
+Owner only. Stamps `releasedAt` on graded attempts so students can open their report; returns
+`{ "releasedAttempts": 2 }`. Release is one-way and refuses to publish partial marks: if any
+not-yet-released attempt still has an answer without an awarded score, the call fails with
+`409 Conflict` and the message `n attempt(s) still have ungraded answers. Score every answer before
+releasing.` Score the remaining answers first, then release.
+
 ### `POST /exams/{id}/analysis-runs`
 Synchronously runs both analyses and persists findings. Returns the run resource even when it fails.
 ```json
@@ -219,6 +278,18 @@ List of run resources, newest first.
     "candidateB": "C002", "summary": "Strong lexical and rare-phrase overlap ...",
     "coverageWarning": false, "evidenceCount": 4, "createdAt": "..." } ]
 ```
+
+### `GET /findings?examId=&type=&status=&band=&limit=`
+Cross-exam review queue, highest priority first. Staff only: admins and reviewers see every exam,
+lecturers only exams they hold `OWNER`/`REVIEWER` access to. All parameters optional; `limit`
+defaults to 100 and is clamped to 200. Rows add the exam reference to the exam-scoped summary.
+```json
+[ { "id": 10, "type": "CANDIDATE_PAIR", "priorityScore": 81.2, "priorityBand": "CRITICAL",
+    "status": "OPEN", "candidateA": "C001", "candidateB": "C002", "summary": "...",
+    "coverageWarning": false, "evidenceCount": 4, "createdAt": "...",
+    "exam": { "id": 1, "code": "DEMO-101", "title": "Demo Examination" } } ]
+```
+Passing `examId` for an exam the caller cannot view returns `403`.
 
 ### `GET /findings/{id}`
 ```json
@@ -264,6 +335,21 @@ Target an existing staff user by id or email:
 { "email": "reviewer@examguard.local", "level": "VIEWER" }
 ```
 Admin or exam owner only. `DELETE /exams/{id}/permissions/{userId}` revokes.
+
+## Reports
+
+### `GET /reports/attempts/{attemptId}` and `/reports/attempts/{attemptId}/pdf`
+The candidate or staff with exam access. Fields: `examTitle`, `candidateCode`, `status`, `released`,
+`scorePoints`, `maxPoints`, per-question marks, correct keys (after release), integrity timeline and
+`reviewSignals`. Until release the call fails with `403 "Results have not been released yet"`.
+`reviewSignals` carries overlap/authorship aids for staff only; students always receive `[]`.
+
+### `GET /reports/exams/{id}`, `/pdf` and `/csv`
+Staff with access to the exam: per-candidate rows and the exam summary; PDF and CSV use the same
+payload. This is what the exam detail header exports.
+
+### `GET /reports/admin/overview` and `/reports/admin/overview/pdf`
+Admin only: platform-wide counts, band mix, grading/release funnel and AI health, as JSON or PDF.
 
 ## Dashboards (staff and students)
 

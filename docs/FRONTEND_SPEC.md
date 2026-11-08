@@ -78,10 +78,19 @@ allow-listed sort columns are honoured; defaults are removed from the URL.
 Form fields: code, title, description, durationMinutes, allowExtension, maxStrikes, instructions,
 opensAt, closesAt, questions and resource rules.
 
-Questions are typed (`SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`, `AUTO` or
-`MANUAL` grading, points, answer keys, explanation). The question dialog has an **Edit / Preview**
-toggle: Preview renders the draft through the same `QuestionRenderer` students use (interactive but
-never saved), so authors see the real layout, options and input type before saving.
+Questions are typed (`SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`, `CODE`
+or `AUTO`/`MANUAL` grading, points, answer keys, explanation). The question dialog has an **Edit /
+Preview** toggle: Preview renders the draft through the same `QuestionRenderer` students use
+(interactive but never saved), so authors see the real layout, options and input type before saving.
+
+`CODE` questions carry a language (`PYTHON`, `JAVASCRIPT`, `JAVA`), optional starter code, and up to
+20 test cases (name, stdin, expected stdout, hidden flag). A question with at least one test defaults
+to automatic grading; without tests it needs a reference solution or rubric and stays manual. Client
+validation requires a language, an expected output for every test case, and either one test or a
+reference solution. The editor is the dependency-free `CodeEditor` (line-number gutter, Tab indent,
+Shift+Tab dedent, Enter keeps indentation) — no Monaco/CodeMirror, to stay inside the bundle budget.
+The authoring form states that code answers are never compared between candidates for similarity or
+authorship, because correct solutions naturally look alike.
 
 Client validation: code required/unique-looking, duration 5–600, maxStrikes 1–10, at least one
 question, no empty prompt, and `closesAt` after `opensAt` when both are set. Show a preview of how a
@@ -93,7 +102,9 @@ automatically.
 
 ### 4.3 Exam detail `/exams/:id`
 
-Header: title, code, status, duration, permission badge, actions (open/close, run analysis).
+Header: title, code, status, duration, permission badge, actions (Export menu → CSV spreadsheet / PDF
+report, run analysis). Exports call `GET /reports/exams/:id/csv` and `/pdf` and save the file as
+`<exam-code>-report.csv|pdf`.
 Tabs:
 
 1. **Overview** — description, schedule (`opensAt`/`closesAt`, enrollment count), questions, rules,
@@ -111,6 +122,9 @@ Tabs:
    navigation moves between candidates (`ArrowUp`/`ArrowLeft`/`j` previous, `ArrowDown`/`ArrowRight`/
    `k` next, ignored while focus is in an input, textarea, select or contenteditable) with Previous /
    Next buttons and a "Candidate N of M" label. Results stay behind the release gate.
+   Coding answers render in a read-only `CodeBlock` with the question's test cases and the per-test
+   result chips from `detail` (passed / failed / compile error, duration, hidden flag). A **Re-run
+   code judging** button calls `POST /exams/{id}/code-judge`; it never overwrites a hand-marked score.
 6. **Settings** — fully editable settings form (title, description, duration, allowExtension,
    maxStrikes, instructions, schedule, resource rules), an **UnsavedChangesGuard** while dirty, and a
    **Results** card showing `releasedCount`/`awaitingReleaseCount` with a link to grading. Also:
@@ -166,7 +180,19 @@ History shows reviewer name, outcome, rationale and time. Do not hide previous d
 Band colors: LOW secondary/neutral, MEDIUM warning, HIGH error, CRITICAL deep error with a distinct
 icon. Never color an entire page red; keep the evidence readable.
 
-### 4.6 Audit `/exams/:id/audit`
+### 4.6 Admin dashboard `/admin`
+
+`GET /admin/dashboard` for counts (accounts, exams, attempts, findings), AI service health, recent
+analysis runs and the audit trail, plus a **Download overview PDF** action backed by
+`GET /reports/admin/overview/pdf`.
+
+**Review findings across exams** — `GET /findings?band=&type=&status=` in a `DataTable` sorted by
+priority: band chip, score, type, exam (links to `/exams/:id?tab=findings`), candidates, status and
+created time; a row opens `/findings/:id`. Type, band and status selects refetch the same endpoint.
+Admins and reviewers see every exam; lecturers only exams they can view. Findings are review aids,
+never proof of misconduct.
+
+### 4.7 Audit `/exams/:id/audit`
 
 `GET /exams/:id/audit`; table with actor, action, entity, time and expandable JSON detail. Read-only.
 Settings edits appear as `EXAM_SETTINGS_UPDATED` with the changed field names.
@@ -182,6 +208,9 @@ past attempts and the join-by-code card.
 code, an "Open now" or "Scheduled" chip, "Opens …" / "Closes …", and for `openNow` a Join button that
 prefills the exam code in the join card (the candidate code is still typed by the student). Nothing
 scheduled renders an explicit empty state, not a blank panel.
+
+Rows in the results table whose marks are not released stay locked: clicking one shows an info toast
+("Marks are not released yet…") instead of navigating, so students do not hit a 403 dead end.
 
 ### 5.2 Join `/join`
 
@@ -199,6 +228,10 @@ store the token in a URL.
   response. Warn at 5 minutes. At zero, submit automatically once; show a blocking receipt.
 - Questions are a vertical list or a step navigation on mobile. Autosize textarea, word counter from
   `maxWords`, no rich text.
+- `CODE` questions use the same `CodeEditor` seeded with the starter code. The text is saved exactly
+  as typed (only CRLF is normalised to LF) — indentation is part of the answer. A caption says the
+  code runs against the question's tests on submit. The starter is seeded into the draft once, so the
+  student can edit or delete it without it snapping back.
 - Autosave: debounce 800 ms, flush on blur, tab hide and submit. Each question keeps a monotonic
   `clientSeq`; on success update `revisionNo` and show "Saved HH:mm". On failure keep the text,
   show "Not saved — retrying" and retry with backoff. Never discard local text.
@@ -218,6 +251,18 @@ The attempt page shows **Connect monitoring extension** with:
 
 The extension popup accepts API base URL + collector token. No page-to-extension messaging is
 required; this keeps the extension ID out of the security boundary and works with an unpacked build.
+
+### 5.5 Report `/attempt/:attemptId/report`
+
+Score ring, per-question marks, integrity timeline and review-aid labels; 403 until the lecturer
+releases grades. Coding answers render in a read-only `CodeBlock` with the language, and the stored
+per-test results (`passed`/`total` and each case's status) when the answer was auto-judged. "No answer
+submitted" is shown for an empty code answer. Overlap and authorship review signals are staff-only and
+never render here, and the API returns `reviewSignals: []` for students. The print stylesheet hides
+the app shell, and the Download PDF button uses the same report payload.
+
+Release gate: a release is refused with `409` while any attempt still has an unscored answer, so a
+partial mark can never reach a student.
 
 ## 6. Chrome extension (MV3)
 

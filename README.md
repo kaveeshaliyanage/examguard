@@ -31,16 +31,17 @@ model's job.
 
 | Part | Stack | Status |
 | --- | --- | --- |
-| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL/PostgreSQL | Complete: auth with student accounts, typed exams and authoring, attempts and the 3-strike integrity policy, auto + manual grading with a release gate, reports and PDF export, dashboards, analysis orchestration, findings, decisions, audit |
+| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL/PostgreSQL | Complete: auth with student accounts, typed exams and authoring (including coding questions), attempts and the 3-strike integrity policy, auto + manual grading with a release gate, sandboxed code judging, reports and PDF export, dashboards, analysis orchestration, findings, decisions, audit |
 | `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, authorship stylometry (capped at 54), isolated payloads |
-| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query/Table, recharts | Complete: staff and admin dashboards, exam authoring, grading queue, findings review, decisions, audit, student dashboard, typed question renderer, integrity dialog, reports |
+| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query/Table, recharts | Complete: staff and admin dashboards, exam authoring with preview, grading queue, findings review, decisions, audit, student dashboard, typed question renderer, code editor, integrity dialog, reports |
+| `runner/` | Python 3.12, FastAPI | Complete: sandboxed Python/JavaScript/Java execution (per-test output, time limit, output cap, no egress, non-root, read-only rootfs) |
 | `extension/` | Chrome MV3, TypeScript | Complete: domain-only observation, persistent queue, batching, backoff, reconnect flow |
 | `ai/app/training/` | scikit-learn, joblib | Complete: synthetic cohort generators, feature export, calibrated pair/incident/authorship training, model cards, external-corpus adapter |
-| `.github/workflows/` | GitHub Actions | Complete: test jobs (backend, PostgreSQL, AI, AI evaluation gates, frontend bundle budget, extension), compose smoke with Playwright, GHCR image publishing on tags, optional VPS deploy |
+| `.github/workflows/` | GitHub Actions | Complete: test jobs (backend, PostgreSQL, AI, AI evaluation gates, runner, frontend bundle budget, extension), compose smoke with Playwright, GHCR image publishing on tags, optional VPS deploy |
 | `kaggle/` | Kaggle CLI | Complete: private dataset, offline training notebook, model storage |
 
-Tests: 36 backend, 40 AI, 22 frontend, 13 extension. The AI suite includes a 100-candidate timing
-benchmark and an export/training/inference consistency check.
+Tests: 105 backend, 40 AI, 83 frontend, 19 runner, 13 extension. The AI suite includes a 100-candidate
+timing benchmark and an export/training/inference consistency check.
 
 ## Quick start with Docker
 
@@ -121,6 +122,12 @@ cd ai
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 python -m uvicorn app.main:app --reload --port 8000
+
+# 2b. code runner (needed for coding questions; backend defaults to http://localhost:8001)
+cd runner
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app.main:app --port 8001
 
 # 3. backend
 cd backend

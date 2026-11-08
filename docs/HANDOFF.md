@@ -30,14 +30,14 @@ LOW 0–29, MEDIUM 30–54, HIGH 55–74, CRITICAL 75–100. Coverage warnings t
 | Exam authoring, permissions, audit | Complete | `ExamApiTest`, `QuestionFields`/`CreateExamPage` tests |
 | Typed questions and answer keys | Complete | `AnswerKeyLeakTest`, `QuestionFields.test.ts`; serialization never exposes keys to students |
 | Attempt lifecycle, strikes, auto-grading | Complete | `AttemptStateMachineTest`, `StrikeServiceITest`, `AutoGradingTest`; live MySQL confirms 3 strikes → `TERMINATED`/`FOCUS_LOSS_LIMIT`, saving after termination returns 409, and autosave no longer clears a committed strike |
-| Manual grading and release gate | Complete | `GradingTab.test.tsx`, `DashboardApiTest`, report 403 before release |
-| Reports and PDF export | Complete | `CsvWriterTest`, `PdfRendererTest` (magic bytes + embedded fonts), `ReportApiTest` (release gate, key after release, PDF text), `StudentReportPage.test.tsx` |
+| Manual grading and release gate | Complete | `GradingTab.test.tsx`, `DashboardApiTest`, `ReleaseGateApiTest` (release refused while any answer is unscored), report 403 before release |
+| Reports and PDF export | Complete | `CsvWriterTest`, `PdfRendererTest` (magic bytes + embedded fonts), `ReportApiTest` (release gate, key after release, PDF text, staff-only review signals), `StudentReportPage.test.tsx`, exam CSV/PDF and admin overview export buttons |
 | Analysis orchestration | Complete | `AnalysisFlowTest`, `AnalysisPayloadIsolationTest` |
 | Authorship analysis | Complete | `AuthorshipAnalysisTest` (cap + single-candidate context), 61 AI tests, CI evaluation gate |
 | Review workflow | Complete | `ReviewWorkflowTest`; live decision and audit |
 | Python analysis service | Complete | 61 pytest tests; live pair, incident and authorship output |
-| Dashboards | Complete | `DashboardApiTest`, `LecturerDashboardPage.test.tsx`, `AdminDashboardPage.test.tsx` |
-| React UI | Complete | 66 Vitest tests (21 files, includes the axe suite), `tsc --noEmit`, `vite build`, bundle budget, 3 Playwright flows |
+| Dashboards | Complete | `DashboardApiTest`, `LecturerDashboardPage.test.tsx`, `AdminDashboardPage.test.tsx`; `/admin` adds the cross-exam findings queue with type/band/status filters |
+| React UI | Complete | 83 Vitest tests (25 files, includes the axe suite), `tsc --noEmit`, `vite build`, bundle budget, 3 Playwright flows |
 | Chrome MV3 extension | Complete | 13 Vitest tests, typecheck, build; extension-origin API simulation |
 | Docker Compose stack | Complete | Full stack run 2026-11-07: health `UP/UP/UP`, login, analysis, decision, audit, student join/save/submit/rejoin through the nginx proxy; Playwright join → strikes → terminate → grade → release → PDF also passes through nginx at `:5173` |
 | CI | `.github/workflows/ci.yml`: backend, backend-postgres, ai, ai-eval, frontend (+budget), extension, compose (+Playwright) | Green on `main` and `develop` before this change; the new jobs are added and run on the next push |
@@ -96,7 +96,7 @@ unchanged in behaviour and is exercised by the CI compose job and release builds
 
 | Addition | Behaviour |
 | --- | --- |
-| Question types | `SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`; `AUTO` or `MANUAL` grading; answer keys never leave the server |
+| Question types | `SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`, `CODE`; `AUTO` or `MANUAL` grading; answer keys (including coding test cases) never leave the server |
 | Attempt lifecycle | `IN_PROGRESS → SUBMITTED / TERMINATED / EXPIRED` through `AttemptStateMachine` |
 | Focus policy | `POST /api/attempts/{id}/integrity/signals` with `UNIQUE(attempt_id, episode_key)`; the third `FOCUS_LOSS` terminates the attempt and auto-grades saved answers. Answers stay in local state and are flushed on resume |
 | Grading | All-or-nothing for single/true-false, proportional for multi-choice, manual queue for short answer/essay |
@@ -120,6 +120,38 @@ unchanged in behaviour and is exercised by the CI compose job and release builds
 | Lecturer charts | Score histogram plus integrity trend (14 UTC days), band mix and Attempts → Submitted → Graded → Released funnel, each with an empty state |
 | URL-synced tables | `lib/tableState.ts` shared by exam list, findings and the migrated attempts table |
 | Accessibility | axe suite over login, join, three dashboards, exam overview, grading and report; `aria-modal="true"` and initial focus asserted for the integrity warning, question dialog and unsaved-changes guard |
+
+## 1c. Phase 3 coding additions (verified 2026-11-08)
+
+| Addition | Behaviour |
+| --- | --- |
+| `CODE` question type | `PYTHON`, `JAVASCRIPT`, `JAVA`; starter code plus up to 20 staff-only test cases (stdin, expected stdout, hidden flag). Created through `POST /api/exams/{id}/questions`; a question with at least one test defaults to `AUTO`, otherwise `MANUAL` with a reference solution or rubric |
+| Sandboxed runner | `runner/` (FastAPI) runs each submission in a fresh temp dir with a 2 s limit, 8 KB output truncation, process-group kill, non-root uid 10001, read-only rootfs, `tmpfs /tmp`, `cap_drop ALL`, no-new-privileges, `mem_limit`/`pids_limit`, and an **internal-only** compose network with no egress. Backend calls it at `http://runner:8000`; it publishes no host port |
+| Judging | After submit, `AUTO` coding answers run against their tests. Partial credit `points × passed / total` (2 dp), compile error 0 with `COMPILE_ERROR`, per-test detail stored in `answer_grade.detail_json` (V4). Runner outage leaves the answer **ungraded**, never zero; `POST /api/exams/{id}/code-judge` re-runs and never overwrites a `MANUAL` grade |
+| Answer storage | `CODE` text is stored verbatim (CRLF/CR → LF only); prose still whitespace-collapsed. Test cases stay in the staff-only `answerKeyJson`; candidates see only language + starter |
+| Fairness | `AnalysisPayloadBuilder` removes `CODE` questions from pair and authorship payloads — identical correct solutions are expected, not collusion. Incident payloads keep every answer; focus-loss signals are unaffected |
+| UI | `CodeEditor` (dependency-free textarea + line-number gutter, Tab/Shift+Tab/Enter indentation) in authoring, attempt and preview; test-case editor; read-only `CodeBlock` plus per-test result chips in grading and the student report; Re-run code judging button |
+| Demo | `DEMO-103` "Coding (DSA)" seeds three coding questions, a released attempt (C201) scored by the runner and an awaiting one (C202), with `student@examguard.local` enrolled |
+
+## 1d. Phase 3 grading and review additions (verified 2026-11-08)
+
+| Addition | Behaviour |
+| --- | --- |
+| Release requires every answer scored | `POST /api/exams/{id}/grades/release` first checks each not-yet-released attempt for a question without an awarded score and returns `409` with `n attempt(s) still have ungraded answers…`. Auto-grading stamps `gradedAt` at submit, so the old "graded" filter alone could publish partial marks; `ReleaseGateApiTest` pins both the refusal and the retry |
+| Unreleased rows stay locked | `/student` results rows for unreleased attempts show the "Not released" chip and an info toast instead of navigating into the 403 report |
+| Report exports in the UI | Exam detail header has **Export CSV** / **Export PDF** (`GET /api/reports/exams/{id}/csv|pdf`, saved as `<exam-code>-report.<ext>`); `/admin` has **Download overview PDF** (`GET /api/reports/admin/overview/pdf`) |
+| Cross-exam findings queue | `GET /api/findings?examId=&type=&status=&band=&limit=` returns `FindingOverviewRow`s with their exam; admins/reviewers see all, lecturers only exams they can view; `/admin` renders it with type/band/status filters |
+| Review signals are staff-only | `ReportService` returns `reviewSignals: []` to students, so the student page and PDF never show overlap/authorship aids |
+
+```text
+backend:  mvn test              -> 105 tests, 0 failures (1 PostgreSQL test skipped without TEST_PG_URL)
+release:  ReleaseGateApiTest    -> 2 tests (409 with an unscored answer, retry releases, already-released not counted)
+queue:    FindingOverviewApiTest-> 4 tests (admin vs lecturer scope, band/type filters, examId 403)
+report:   ReportApiTest         -> 6 tests (student reviewSignals empty, staff sees band/labels)
+frontend: npm test              -> 83 tests, 0 failures (25 files, axe included)
+frontend: tsc --noEmit          -> clean
+frontend: vite build + budget   -> 350.7 kB gzip (budget 420 kB)
+```
 
 ## 2. Known gaps
 
@@ -158,6 +190,16 @@ unchanged in behaviour and is exercised by the CI compose job and release builds
 - Closing an MUI dialog logs one Chrome warning about `aria-hidden` on the focused element while focus
   is restored (MUI 5 internal ordering). It is a warning, not an error, and the axe focus assertions
   pass; no page functionality is affected.
+- Coding judging needs the `runner` container. Without it, submit still succeeds and the answers stay
+  **ungraded** (never zero); start the runner and press **Re-run code judging**. The sandbox is process
+  isolation (no egress, non-root, read-only rootfs, dropped capabilities, rlimits), not a proven
+  security boundary for hostile code.
+- The sandbox limits are fixed at 2 s and 8 KB of output per attempt; Java gets one compile shared by
+  all its tests, and JS/JVM get heap caps instead of an address-space cap (they reserve far more
+  virtual memory than they use). Starter code is trimmed on save; submitted code is stored verbatim.
+- Authoring a `CODE` question without `gradingMode` defaults it to `AUTO` when at least one test case
+  exists, otherwise `MANUAL`. Sending `gradingMode: "MANUAL"` explicitly keeps a test-backed question
+  hand-marked.
 
 ## 3. How to run
 
@@ -362,3 +404,10 @@ Phase 2 additions were re-verified end to end on 2026-11-08: the compose stack b
 migration on MySQL, PostgreSQL 16 validates the same schema, the three Playwright flows still pass,
 and the roster, schedule, settings, preview, keyboard grading, charts and axe suite are covered by
 the tests listed above.
+
+Coding questions were verified on 2026-11-08: Flyway V4 applies on MySQL and PostgreSQL 16 with
+`ddl-auto: validate`; 98 backend tests and 75 frontend tests pass, as do 19 runner tests, typecheck,
+build and the 349.6 kB / 420 kB budget; the three Playwright flows pass against the rebuilt stack. In
+a live browser walkthrough, DEMO-103 selected the seeded attempts (C201 23.33/30 with a 1-of-3 test
+result on the JavaScript task, C202 10/30) and a fresh student account joined through the dashboard,
+typed Python in the code editor, autosaved, submitted, and was auto-judged to 10.00 by the sandbox.
