@@ -1,79 +1,109 @@
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
-import Paper from '@mui/material/Paper';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
 import { useExamAttempts } from '../../api/staffQueries';
-import { EmptyState } from '../../components/EmptyState';
-import { LoadingBlock } from '../../components/LoadingBlock';
+import type { AttemptSummary } from '../../api/types';
+import { DataTable } from '../../components/DataTable';
+import type { DataTableColumn } from '../../components/DataTable';
 import { StatusChip } from '../../components/StatusChip';
 import { formatDateTime, formatPercent } from '../../lib/format';
+import { useTableUrlState } from '../../lib/tableState';
+
+const sortableColumns = new Set([
+  'candidate',
+  'status',
+  'started',
+  'submitted',
+  'answers',
+  'events',
+  'coverage',
+  'late',
+]);
+
+const tableOptions = {
+  keys: { sort: 'asort', dir: 'adir', query: 'aq', page: 'apage', size: 'asize' },
+  sortable: sortableColumns,
+} as const;
+
+const columns: DataTableColumn<AttemptSummary>[] = [
+  {
+    id: 'candidate',
+    header: 'Candidate',
+    accessorFn: (attempt) => attempt.candidateCode,
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    accessorFn: (attempt) => attempt.status,
+    cell: (attempt) => <StatusChip status={attempt.status} />,
+  },
+  {
+    id: 'started',
+    header: 'Started',
+    accessorFn: (attempt) => attempt.startedAt,
+    cell: (attempt) => formatDateTime(attempt.startedAt),
+  },
+  {
+    id: 'submitted',
+    header: 'Submitted',
+    accessorFn: (attempt) => attempt.submittedAt ?? '',
+    cell: (attempt) => formatDateTime(attempt.submittedAt),
+  },
+  {
+    id: 'answers',
+    header: 'Answers',
+    align: 'right',
+    accessorFn: (attempt) => attempt.answerCount,
+  },
+  {
+    id: 'events',
+    header: 'Events',
+    align: 'right',
+    accessorFn: (attempt) => attempt.eventCount,
+  },
+  {
+    id: 'coverage',
+    header: 'Coverage',
+    accessorFn: (attempt) => attempt.coveragePercent,
+    cell: (attempt) => (
+      <Chip
+        size="small"
+        variant="outlined"
+        color={attempt.coverageWarning ? 'warning' : 'default'}
+        label={
+          attempt.coverageWarning
+            ? `Coverage ${formatPercent(attempt.coveragePercent)} — unknown, not clean`
+            : `Coverage ${formatPercent(attempt.coveragePercent)}`
+        }
+      />
+    ),
+  },
+  {
+    id: 'late',
+    header: 'Late',
+    accessorFn: (attempt) => (attempt.lateSubmission ? 'Yes' : 'No'),
+  },
+];
 
 export function AttemptsTab({ examId }: { examId: number }) {
   const attempts = useExamAttempts(examId);
+  const [tableState, setTableState] = useTableUrlState(tableOptions);
 
-  if (attempts.isLoading) {
-    return <LoadingBlock rows={4} />;
-  }
   if (attempts.isError) {
     return <Alert severity="error">{attempts.error.message}</Alert>;
   }
-  if (!attempts.data || attempts.data.length === 0) {
-    return (
-      <EmptyState
-        title="No attempts yet"
-        body="Share the exam code with candidates. Submitted attempts appear here after they join."
-      />
-    );
-  }
 
   return (
-    <TableContainer component={Paper} variant="outlined">
-      <Table size="small" aria-label="Attempts">
-        <TableHead>
-          <TableRow>
-            <TableCell>Candidate</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Started</TableCell>
-            <TableCell>Submitted</TableCell>
-            <TableCell align="right">Answers</TableCell>
-            <TableCell align="right">Events</TableCell>
-            <TableCell>Coverage</TableCell>
-            <TableCell>Late</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {attempts.data.map((attempt) => (
-            <TableRow key={attempt.attemptId} hover>
-              <TableCell sx={{ fontWeight: 600 }}>{attempt.candidateCode}</TableCell>
-              <TableCell>
-                <StatusChip status={attempt.status} />
-              </TableCell>
-              <TableCell>{formatDateTime(attempt.startedAt)}</TableCell>
-              <TableCell>{formatDateTime(attempt.submittedAt)}</TableCell>
-              <TableCell align="right">{attempt.answerCount}</TableCell>
-              <TableCell align="right">{attempt.eventCount}</TableCell>
-              <TableCell>
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  color={attempt.coverageWarning ? 'warning' : 'default'}
-                  label={
-                    attempt.coverageWarning
-                      ? `Coverage ${formatPercent(attempt.coveragePercent)} — unknown, not clean`
-                      : `Coverage ${formatPercent(attempt.coveragePercent)}`
-                  }
-                />
-              </TableCell>
-              <TableCell>{attempt.lateSubmission ? 'Yes' : 'No'}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+    <DataTable
+      data={attempts.data ?? []}
+      columns={columns}
+      ariaLabel="Attempts"
+      isLoading={attempts.isLoading}
+      searchPlaceholder="Search candidates or status…"
+      emptyTitle="No attempts yet"
+      emptyBody="Share the exam code with candidates. Submitted attempts appear here after they join."
+      getRowId={(attempt) => String(attempt.attemptId)}
+      state={tableState}
+      onStateChange={setTableState}
+    />
   );
 }

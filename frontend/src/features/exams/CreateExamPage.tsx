@@ -14,7 +14,8 @@ import { useCreateExam } from '../../api/staffQueries';
 import type { CreateExamInput, CreateQuestionInput, CreateRuleInput } from '../../api/types';
 import { AppShell } from '../../components/AppShell';
 import { describeDomainRule } from '../../lib/domains';
-import { QuestionFields } from './QuestionFields';
+import { fromDateTimeLocalValue } from '../../lib/format';
+import { QuestionFields, emptyQuestion, validateQuestion } from './QuestionFields';
 import { RuleFields } from './RuleFields';
 
 interface HeaderState {
@@ -23,6 +24,10 @@ interface HeaderState {
   description: string;
   durationMinutes: number;
   allowExtension: boolean;
+  maxStrikes: number;
+  instructions: string;
+  opensAt: string;
+  closesAt: string;
 }
 
 function validate(
@@ -39,15 +44,21 @@ function validate(
   if (!Number.isInteger(header.durationMinutes) || header.durationMinutes < 5 || header.durationMinutes > 480) {
     return 'Duration must be between 5 and 480 minutes.';
   }
+  if (!Number.isInteger(header.maxStrikes) || header.maxStrikes < 1 || header.maxStrikes > 10) {
+    return 'Focus-loss limit must be between 1 and 10.';
+  }
+  const opensAt = fromDateTimeLocalValue(header.opensAt);
+  const closesAt = fromDateTimeLocalValue(header.closesAt);
+  if (opensAt && closesAt && new Date(opensAt) >= new Date(closesAt)) {
+    return 'The exam must close after it opens.';
+  }
   if (questions.length === 0) {
     return 'Add at least one question.';
   }
   for (const [index, question] of questions.entries()) {
-    if (!question.prompt.trim()) {
-      return `Question ${index + 1} needs a prompt.`;
-    }
-    if (!Number.isInteger(question.maxWords) || question.maxWords < 1 || question.maxWords > 5000) {
-      return `Question ${index + 1} needs a word limit between 1 and 5000.`;
+    const problem = validateQuestion(question, index);
+    if (problem) {
+      return problem;
     }
   }
   for (const [index, rule] of rules.entries()) {
@@ -71,8 +82,12 @@ export function CreateExamPage() {
     description: '',
     durationMinutes: 60,
     allowExtension: true,
+    maxStrikes: 3,
+    instructions: '',
+    opensAt: '',
+    closesAt: '',
   });
-  const [questions, setQuestions] = useState<CreateQuestionInput[]>([{ prompt: '', maxWords: 250 }]);
+  const [questions, setQuestions] = useState<CreateQuestionInput[]>([emptyQuestion()]);
   const [rules, setRules] = useState<CreateRuleInput[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,9 +105,18 @@ export function CreateExamPage() {
       description: header.description.trim() || null,
       durationMinutes: header.durationMinutes,
       allowExtension: header.allowExtension,
+      maxStrikes: header.maxStrikes,
+      instructions: header.instructions.trim() || null,
+      opensAt: fromDateTimeLocalValue(header.opensAt),
+      closesAt: fromDateTimeLocalValue(header.closesAt),
       questions: questions.map((question) => ({
         prompt: question.prompt.trim(),
+        type: question.type,
+        points: question.points,
         maxWords: question.maxWords,
+        content: question.content ?? {},
+        answerKey: question.answerKey ?? {},
+        explanation: question.explanation?.trim() || null,
       })),
       resourceRules: rules.map((rule) => ({
         category: rule.category,
@@ -159,6 +183,45 @@ export function CreateExamPage() {
               fullWidth
               inputProps={{ maxLength: 4000 }}
             />
+            <TextField
+              label="Instructions shown before the exam"
+              value={header.instructions}
+              onChange={(event) => setHeader({ ...header, instructions: event.target.value })}
+              multiline
+              minRows={3}
+              fullWidth
+              inputProps={{ maxLength: 8000 }}
+              helperText="Explain the focus-loss policy, permitted resources and how answers are saved."
+            />
+            <TextField
+              label="Focus-loss limit (strikes)"
+              type="number"
+              value={header.maxStrikes}
+              onChange={(event) => setHeader({ ...header, maxStrikes: Number(event.target.value) })}
+              sx={{ width: { xs: '100%', sm: 220 } }}
+              inputProps={{ min: 1, max: 10 }}
+              helperText="The attempt terminates when this many focus losses are recorded."
+            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                label="Opens at"
+                type="datetime-local"
+                value={header.opensAt}
+                onChange={(event) => setHeader({ ...header, opensAt: event.target.value })}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                helperText="Optional. New joins are refused before this time."
+              />
+              <TextField
+                label="Closes at"
+                type="datetime-local"
+                value={header.closesAt}
+                onChange={(event) => setHeader({ ...header, closesAt: event.target.value })}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                helperText="Optional. New joins are refused after this time."
+              />
+            </Stack>
             <FormControlLabel
               control={
                 <Switch

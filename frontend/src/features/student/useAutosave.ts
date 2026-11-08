@@ -7,6 +7,7 @@ export type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error';
 
 export interface DraftAnswer {
   text: string;
+  selectedOptions: string[];
   revisionNo: number;
   savedAt: string | null;
   status: SaveStatus;
@@ -14,15 +15,18 @@ export interface DraftAnswer {
 
 interface AutosaveEntry {
   text: string;
+  selectedOptions: string[];
   revisionNo: number;
   savedAt: string | null;
   status: SaveStatus;
   seq: number;
   lastSavedText: string;
+  lastSavedOptions: string[];
   debounceTimer: ReturnType<typeof setTimeout> | null;
   retryTimer: ReturnType<typeof setTimeout> | null;
   inFlight: Promise<void> | null;
   retryCount: number;
+  halted: boolean;
   disposed: boolean;
 }
 
@@ -32,32 +36,53 @@ export interface UseAutosaveArgs {
   initialAnswers: AnswerView[];
   enabled?: boolean;
   debounceMs?: number;
+  maxRetries?: number;
   onUnauthorized?: () => void;
+  onSaveStopped?: (error: ApiError, questionId: number) => void;
 }
 
 export interface UseAutosaveResult {
   answers: Record<number, DraftAnswer>;
-  setAnswer: (questionId: number, text: string) => void;
+  setAnswer: (questionId: number, text: string, selectedOptions?: string[]) => void;
   flush: (questionId: number) => Promise<void>;
   flushAll: () => Promise<void>;
   overallStatus: SaveStatus;
   lastSavedAt: string | null;
+  hasUnsavedChanges: boolean;
+  halted: boolean;
+}
+
+function sameOptions(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((value, index) => value === right[index]);
 }
 
 function entryFrom(answer: AnswerView): AutosaveEntry {
+  const selectedOptions = answer.selectedOptions ?? [];
   return {
     text: answer.text,
+    selectedOptions,
     revisionNo: answer.revisionNo,
     savedAt: answer.savedAt,
     status: 'saved',
     seq: 0,
     lastSavedText: answer.text,
+    lastSavedOptions: [...selectedOptions],
     debounceTimer: null,
     retryTimer: null,
     inFlight: null,
     retryCount: 0,
+    halted: false,
     disposed: false,
   };
+}
+
+function isUpToDate(entry: AutosaveEntry): boolean {
+  return entry.text === entry.lastSavedText && sameOptions(entry.selectedOptions, entry.lastSavedOptions);
 }
 
 export function useAutosave({
@@ -66,7 +91,9 @@ export function useAutosave({
   initialAnswers,
   enabled = true,
   debounceMs = 800,
+  maxRetries = 5,
   onUnauthorized,
+  onSaveStopped,
 }: UseAutosaveArgs): UseAutosaveResult {
   const entries = useRef<Map<number, AutosaveEntry>>(
     new Map(initialAnswers.map((answer) => [answer.questionId, entryFrom(answer)])),
@@ -77,6 +104,7 @@ export function useAutosave({
         answer.questionId,
         {
           text: answer.text,
+          selectedOptions: answer.selectedOptions ?? [],
           revisionNo: answer.revisionNo,
           savedAt: answer.savedAt,
           status: 'saved' as SaveStatus,
@@ -88,6 +116,8 @@ export function useAutosave({
   enabledRef.current = enabled;
   const unauthorizedRef = useRef(onUnauthorized);
   unauthorizedRef.current = onUnauthorized;
+  const stoppedRef = useRef(onSaveStopped);
+  stoppedRef.current = onSaveStopped;
 
   const patch = useCallback((questionId: number, next: Partial<DraftAnswer>) => {
     setDrafts((previous) => {
@@ -102,14 +132,13 @@ export function useAutosave({
   const performSave = useCallback(
     (questionId: number): Promise<void> => {
       const entry = entries.current.get(questionId);
-      if (!entry || entry.disposed || !enabledRef.current) {
+      if (!entry || entry.disposed || entry.halted || !enabledRef.current) {
         return Promise.resolve();
       }
       if (entry.inFlight) {
         return entry.inFlight;
       }
-      const text = entry.text;
-      if (text === entry.lastSavedText) {
+      if (isUpToDate(entry)) {
         return Promise.resolve();
       }
       if (entry.retryTimer) {
@@ -118,34 +147,31 @@ export function useAutosave({
       }
       entry.seq += 1;
       const seq = entry.seq;
+      const text = entry.text;
+      const selectedOptions = [...entry.selectedOptions];
 
       entry.status = 'saving';
       const run = (async () => {
         patch(questionId, { status: 'saving' });
         try {
-          const saved = await saveAnswer(attemptId, token, questionId, text, seq);
+          const saved =
+            selectedOptions.length > 0
+              ? await saveAnswer(attemptId, token, questionId, text, seq, selectedOptions)
+              : await saveAnswer(attemptId, token, questionId, text, seq);
           if (entry.disposed) {
             return;
           }
           entry.revisionNo = saved.revisionNo;
           entry.savedAt = saved.savedAt;
           entry.lastSavedText = text;
+          entry.lastSavedOptions = selectedOptions;
           entry.retryCount = 0;
-          if (entry.text === text) {
-            entry.status = 'saved';
-            patch(questionId, {
-              status: 'saved',
-              revisionNo: saved.revisionNo,
-              savedAt: saved.savedAt,
-            });
-          } else {
-            entry.status = 'dirty';
-            patch(questionId, {
-              status: 'dirty',
-              revisionNo: saved.revisionNo,
-              savedAt: saved.savedAt,
-            });
-          }
+          entry.status = isUpToDate(entry) ? 'saved' : 'dirty';
+          patch(questionId, {
+            status: entry.status,
+            revisionNo: saved.revisionNo,
+            savedAt: saved.savedAt,
+          });
         } catch (caught) {
           if (entry.disposed) {
             return;
@@ -153,7 +179,25 @@ export function useAutosave({
           entry.status = 'error';
           patch(questionId, { status: 'error' });
           if (caught instanceof ApiError && caught.status === 401) {
+            entry.halted = true;
             unauthorizedRef.current?.();
+            return;
+          }
+          // 409/410 mean the attempt can no longer accept edits. Retrying cannot help.
+          if (caught instanceof ApiError && (caught.status === 409 || caught.status === 410)) {
+            entry.halted = true;
+            stoppedRef.current?.(caught, questionId);
+            return;
+          }
+          if (entry.retryCount >= Math.max(1, maxRetries) - 1) {
+            entry.halted = true;
+            const exhausted = new ApiError(
+              caught instanceof ApiError ? caught.status : 0,
+              'Autosave stopped after repeated failures. Your latest text is still in this tab.',
+              'autosave',
+              'network',
+            );
+            stoppedRef.current?.(exhausted, questionId);
             return;
           }
           entry.retryCount += 1;
@@ -170,56 +214,67 @@ export function useAutosave({
       entry.inFlight = run;
       void run.then(() => {
         const current = entries.current.get(questionId);
-        if (current && current.text !== current.lastSavedText && current.status !== 'error') {
+        if (current && !current.halted && !isUpToDate(current) && current.status !== 'error') {
           void performSaveRef.current(questionId);
         }
       });
       return run;
     },
-    [attemptId, patch, token],
+    [attemptId, maxRetries, patch, token],
   );
 
   const performSaveRef = useRef(performSave);
   performSaveRef.current = performSave;
 
+  const scheduleSave = useCallback((questionId: number) => {
+    const entry = entries.current.get(questionId);
+    if (!entry || entry.disposed || entry.halted) {
+      return;
+    }
+    if (entry.debounceTimer) {
+      clearTimeout(entry.debounceTimer);
+    }
+    entry.debounceTimer = setTimeout(() => {
+      entry.debounceTimer = null;
+      void performSaveRef.current(questionId);
+    }, debounceMs);
+  }, [debounceMs]);
+
   const setAnswer = useCallback(
-    (questionId: number, text: string) => {
+    (questionId: number, text: string, selectedOptions?: string[]) => {
       const entry = entries.current.get(questionId);
       if (!entry || entry.disposed) {
         return;
       }
       entry.text = text;
-      entry.status = text === entry.lastSavedText ? 'saved' : 'dirty';
-      if (entry.debounceTimer) {
-        clearTimeout(entry.debounceTimer);
-        entry.debounceTimer = null;
+      if (selectedOptions) {
+        entry.selectedOptions = [...selectedOptions];
       }
-      patch(questionId, { text, status: text === entry.lastSavedText ? 'saved' : 'dirty' });
-      if (!enabledRef.current || text === entry.lastSavedText) {
+      entry.status = isUpToDate(entry) ? 'saved' : 'dirty';
+      patch(questionId, {
+        text,
+        selectedOptions: entry.selectedOptions,
+        status: entry.status,
+      });
+      if (!enabledRef.current || entry.halted || isUpToDate(entry)) {
         return;
       }
-      entry.debounceTimer = setTimeout(() => {
-        entry.debounceTimer = null;
-        void performSaveRef.current(questionId);
-      }, debounceMs);
+      scheduleSave(questionId);
     },
-    [debounceMs, patch],
+    [patch, scheduleSave],
   );
 
-  const flush = useCallback(
-    (questionId: number): Promise<void> => {
-      const entry = entries.current.get(questionId);
-      if (!entry) {
-        return Promise.resolve();
-      }
-      if (entry.debounceTimer) {
-        clearTimeout(entry.debounceTimer);
-        entry.debounceTimer = null;
-      }
-      return performSaveRef.current(questionId);
-    },
-    [],
-  );
+  const flush = useCallback((questionId: number): Promise<void> => {
+    const entry = entries.current.get(questionId);
+    if (!entry) {
+      return Promise.resolve();
+    }
+    if (entry.debounceTimer) {
+      clearTimeout(entry.debounceTimer);
+      entry.debounceTimer = null;
+    }
+    return performSaveRef.current(questionId);
+  }, []);
 
   const flushAll = useCallback(async () => {
     const pending = [...entries.current.keys()].map((questionId) => flush(questionId));
@@ -284,5 +339,30 @@ export function useAutosave({
     return values.length === 0 ? null : values.sort().at(-1) ?? null;
   }, [drafts]);
 
-  return { answers: drafts, setAnswer, flush, flushAll, overallStatus, lastSavedAt };
+  const hasUnsavedChanges = useMemo(
+    () =>
+      [...entries.current.values()].some(
+        (entry) => !entry.halted && !entry.disposed && !isUpToDate(entry),
+      ),
+    // Recompute whenever a draft is patched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drafts],
+  );
+
+  const halted = useMemo(
+    () => [...entries.current.values()].some((entry) => entry.halted),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drafts],
+  );
+
+  return {
+    answers: drafts,
+    setAnswer,
+    flush,
+    flushAll,
+    overallStatus,
+    lastSavedAt,
+    hasUnsavedChanges,
+    halted,
+  };
 }

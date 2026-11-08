@@ -22,14 +22,20 @@ import { StatusChip } from '../../components/StatusChip';
 import { formatDurationMinutes, humanize } from '../../lib/format';
 import { AttemptsTab } from './AttemptsTab';
 import { ExamOverviewTab } from './ExamOverviewTab';
+import { GradingTab } from './GradingTab';
+import { QuestionsTab } from './QuestionsTab';
 import { FindingsTab } from './FindingsTab';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
 
-const tabs = ['overview', 'attempts', 'findings', 'runs', 'settings'] as const;
+const tabs = ['overview', 'questions', 'grading', 'attempts', 'findings', 'runs', 'settings'] as const;
 type TabValue = (typeof tabs)[number];
 
-const findingTypes: FindingType[] = ['CANDIDATE_PAIR', 'CANDIDATE_INCIDENT'];
+const findingTypes: FindingType[] = [
+  'CANDIDATE_PAIR',
+  'CANDIDATE_INCIDENT',
+  'CANDIDATE_AUTHORSHIP',
+];
 const findingStatuses: FindingStatus[] = [
   'OPEN',
   'CONFIRMED',
@@ -158,6 +164,8 @@ export function ExamDetailPage() {
 
             <Tabs value={tab} onChange={(_, value: TabValue) => update({ tab: value })} variant="scrollable">
               <Tab value="overview" label="Overview" />
+              <Tab value="questions" label="Questions" />
+              <Tab value="grading" label="Grading" />
               <Tab value="attempts" label="Attempts" />
               <Tab value="findings" label="Findings" />
               <Tab value="runs" label="Runs" />
@@ -165,6 +173,8 @@ export function ExamDetailPage() {
             </Tabs>
 
             {tab === 'overview' ? <ExamOverviewTab exam={exam} latestRun={latestRun} /> : null}
+            {tab === 'questions' ? <QuestionsTab exam={exam} canManage={isOwner} /> : null}
+            {tab === 'grading' ? <GradingTab exam={exam} canReview={isOwner || isAdmin} /> : null}
             {tab === 'attempts' ? <AttemptsTab examId={exam.id} /> : null}
             {tab === 'findings' ? (
               <FindingsTab

@@ -10,7 +10,15 @@ export function AttemptStatusChip({ status }: { status: string }) {
     <Chip
       size="small"
       variant="outlined"
-      color={status === 'SUBMITTED' ? 'success' : status === 'EXPIRED' ? 'default' : 'info'}
+      color={
+        status === 'SUBMITTED'
+          ? 'success'
+          : status === 'TERMINATED'
+            ? 'error'
+            : status === 'EXPIRED'
+              ? 'default'
+              : 'info'
+      }
       label={humanize(status)}
     />
   );

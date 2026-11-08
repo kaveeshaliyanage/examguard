@@ -1,5 +1,5 @@
 import { isRecord, isString } from '../api/client';
-import type { User } from '../api/types';
+import type { StudentUser, User } from '../api/types';
 
 const STAFF_KEY = 'examguard.staff';
 
@@ -135,4 +135,45 @@ export function readAttemptReceipt(attemptId: number): AttemptReceipt | null {
     // A corrupt receipt is ignored.
   }
   return null;
+}
+
+const STUDENT_KEY = 'examguard.student';
+
+export interface StudentSession {
+  token: string;
+  user: StudentUser;
+}
+
+function isStudentUser(value: unknown): value is StudentUser {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'number' &&
+    isString(value.email) &&
+    isString(value.displayName)
+  );
+}
+
+export function readStudentSession(): StudentSession | null {
+  const raw = sessionStorage.getItem(STUDENT_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isRecord(parsed) && isString(parsed.token) && isStudentUser(parsed.user)) {
+      return { token: parsed.token, user: parsed.user };
+    }
+  } catch {
+    // A corrupt value is treated as signed out.
+  }
+  sessionStorage.removeItem(STUDENT_KEY);
+  return null;
+}
+
+export function writeStudentSession(session: StudentSession): void {
+  sessionStorage.setItem(STUDENT_KEY, JSON.stringify(session));
+}
+
+export function clearStudentSession(): void {
+  sessionStorage.removeItem(STUDENT_KEY);
 }

@@ -1,5 +1,21 @@
-import { isJoinResponse, isRecord, request } from './client';
-import type { AttemptState, JoinResponse, SaveAnswerResponse, SubmitResponse } from './types';
+import { isArrayOf, isJoinResponse, isRecord, request } from './client';
+import type {
+  AttemptState,
+  IntegritySignal,
+  IntegritySignalResponse,
+  JoinResponse,
+  SaveAnswerResponse,
+  SubmitResponse,
+} from './types';
+
+function isAnswer(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.questionId === 'number' &&
+    typeof value.text === 'string' &&
+    (value.selectedOptions === undefined || isArrayOf(value.selectedOptions, (item) => typeof item === 'string'))
+  );
+}
 
 function isAttemptState(value: unknown): boolean {
   return (
@@ -9,7 +25,17 @@ function isAttemptState(value: unknown): boolean {
     typeof value.startedAt === 'string' &&
     typeof value.serverNow === 'string' &&
     isRecord(value.exam) &&
-    Array.isArray(value.answers)
+    isArrayOf(value.answers, isAnswer)
+  );
+}
+
+function isIntegritySignalResponse(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.strikeCount === 'number' &&
+    typeof value.maxStrikes === 'number' &&
+    typeof value.terminated === 'boolean' &&
+    typeof value.status === 'string'
   );
 }
 
@@ -35,12 +61,13 @@ export function saveAnswer(
   questionId: number,
   text: string,
   clientSeq: number,
+  selectedOptions: string[] = [],
 ): Promise<SaveAnswerResponse> {
   return request<SaveAnswerResponse>(`/attempts/${attemptId}/answers/${questionId}`, {
     method: 'PUT',
     token,
     scope: 'attempt',
-    body: { text, clientSeq },
+    body: { text, selectedOptions, clientSeq },
     validate: (value) =>
       isRecord(value) &&
       typeof value.questionId === 'number' &&
@@ -54,5 +81,21 @@ export function submitAttempt(attemptId: number, token: string): Promise<SubmitR
     method: 'POST',
     token,
     scope: 'attempt',
+  });
+}
+
+export function postIntegritySignal(
+  attemptId: number,
+  token: string,
+  episodeKey: string,
+  signal: IntegritySignal,
+  occurredAt: string,
+): Promise<IntegritySignalResponse> {
+  return request<IntegritySignalResponse>(`/attempts/${attemptId}/integrity/signals`, {
+    method: 'POST',
+    token,
+    scope: 'attempt',
+    body: { episodeKey, signal, occurredAt },
+    validate: isIntegritySignalResponse,
   });
 }

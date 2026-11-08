@@ -36,7 +36,7 @@ export function JoinPage() {
         candidateCode: candidateCode.trim(),
         examCode: response.exam.code,
       });
-      navigate(`/attempt/${response.attemptId}`, { replace: true });
+      navigate(`/attempt/${response.attemptId}/instructions`, { replace: true });
     } catch (caught) {
       if (caught instanceof ApiError) {
         if (caught.status === 409) {
