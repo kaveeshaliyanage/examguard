@@ -1,0 +1,50 @@
+# Render Blueprint for the ExamGuard cloud deployment.
+# Deploy from the repo root: New > Blueprint > select this repository.
+# Runtime secrets (SPRING_DATASOURCE_*, CORS_ALLOWED_ORIGINS) are entered in the dashboard.
+
+services:
+  - type: web
+    name: examguard-api
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_VENDOR
+        value: postgresql
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_STAFF_TTL_MINUTES
+        value: "480"
+      - key: JWT_ATTEMPT_TTL_MINUTES
+        value: "360"
+      - key: ANALYSIS_BASE_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: SEED_DEMO_DATA
+        value: "false"
+
+  - type: web
+    name: examguard-ai
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./ai/Dockerfile
+    dockerContext: ./ai
+    healthCheckPath: /health
+    envVars:
+      - key: MODEL_DIR
+        value: /app/models
+      - key: USE_LEARNED_FUSION
+        value: "false"
+      - key: SEMANTIC_ENABLED
+        value: "false"

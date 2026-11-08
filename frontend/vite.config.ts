@@ -30,6 +30,12 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       globals: true,
       setupFiles: './src/test/setup.ts',
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      // Playwright owns e2e/ and cannot be collected by Vitest.
+      exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
+      // MUI + jsdom renders take a few seconds each on slower CI machines.
+      testTimeout: 20000,
+      hookTimeout: 20000,
     },
   };
 });

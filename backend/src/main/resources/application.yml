@@ -22,6 +22,8 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # DDL is per-vendor; common holds portable data-only migrations.
+    locations: classpath:db/migration/common,classpath:db/migration/${app.db.vendor:mysql}
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -43,6 +45,8 @@ management:
       show-details: when_authorized
 
 app:
+  db:
+    vendor: ${DB_VENDOR:mysql}
   jwt:
     secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
     staff-ttl-minutes: ${JWT_STAFF_TTL_MINUTES:480}

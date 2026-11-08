@@ -42,3 +42,7 @@ Thumbs.db
 # office lock files
 ~$*
 docs/.qoder-office-pptx-locks/
+
+# playwright
+frontend/playwright-report/
+frontend/test-results/
