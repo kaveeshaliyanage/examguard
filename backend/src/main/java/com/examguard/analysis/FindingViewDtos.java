@@ -43,6 +43,21 @@ public final class FindingViewDtos {
             Instant createdAt) {
     }
 
+    public record FindingOverviewRow(
+            Long id,
+            FindingType type,
+            double priorityScore,
+            PriorityBand priorityBand,
+            FindingStatus status,
+            String candidateA,
+            String candidateB,
+            String summary,
+            boolean coverageWarning,
+            long evidenceCount,
+            Instant createdAt,
+            ExamRef exam) {
+    }
+
     public record EvidenceView(
             Long id,
             EvidenceSource source,

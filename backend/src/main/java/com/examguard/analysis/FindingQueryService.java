@@ -3,14 +3,18 @@ package com.examguard.analysis;
 import com.examguard.analysis.FindingViewDtos.DecisionView;
 import com.examguard.analysis.FindingViewDtos.EvidenceView;
 import com.examguard.analysis.FindingViewDtos.FindingDetail;
+import com.examguard.analysis.FindingViewDtos.FindingOverviewRow;
 import com.examguard.analysis.FindingViewDtos.FindingSummary;
 import com.examguard.domain.EvidenceItem;
+import com.examguard.domain.Exam;
 import com.examguard.domain.Finding;
 import com.examguard.domain.FindingStatus;
 import com.examguard.domain.FindingType;
+import com.examguard.domain.PriorityBand;
 import com.examguard.domain.ReviewDecision;
 import com.examguard.dto.CommonDtos.ExamRef;
 import com.examguard.repo.EvidenceItemRepository;
+import com.examguard.repo.ExamRepository;
 import com.examguard.repo.FindingRepository;
 import com.examguard.repo.ReviewDecisionRepository;
 import com.examguard.service.AccessService;
@@ -25,6 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class FindingQueryService {
@@ -32,6 +38,7 @@ public class FindingQueryService {
     private final FindingRepository findingRepository;
     private final EvidenceItemRepository evidenceRepository;
     private final ReviewDecisionRepository decisionRepository;
+    private final ExamRepository examRepository;
     private final FindingContextBuilder contextBuilder;
     private final AccessService accessService;
     private final ObjectMapper objectMapper;
@@ -40,12 +47,14 @@ public class FindingQueryService {
             FindingRepository findingRepository,
             EvidenceItemRepository evidenceRepository,
             ReviewDecisionRepository decisionRepository,
+            ExamRepository examRepository,
             FindingContextBuilder contextBuilder,
             AccessService accessService,
             ObjectMapper objectMapper) {
         this.findingRepository = findingRepository;
         this.evidenceRepository = evidenceRepository;
         this.decisionRepository = decisionRepository;
+        this.examRepository = examRepository;
         this.contextBuilder = contextBuilder;
         this.accessService = accessService;
         this.objectMapper = objectMapper;
@@ -56,6 +65,35 @@ public class FindingQueryService {
                                      FindingType type, FindingStatus status) {
         accessService.requireExamView(auth, examId);
         return findings(examId, type, status).stream().map(this::summary).toList();
+    }
+
+    /** Cross-exam review queue. Lecturers only see findings of exams they can view. */
+    @Transactional(readOnly = true)
+    public List<FindingOverviewRow> overview(Authentication auth, Long examId, FindingType type,
+                                             FindingStatus status, PriorityBand band, int limit) {
+        accessService.requireStaff(auth);
+        String role = accessService.role(auth);
+        Set<Long> visible = "ADMIN".equals(role) || "REVIEWER".equals(role)
+                ? null
+                : examRepository.findAllForUser(accessService.actorId(auth)).stream()
+                        .map(Exam::getId)
+                        .collect(Collectors.toSet());
+        if (examId != null) {
+            accessService.requireExamView(auth, examId);
+        }
+        List<Finding> candidates = examId == null
+                ? findingRepository.findTop500ByOrderByPriorityScoreDesc()
+                : findingRepository.findByExamIdOrderByPriorityScoreDesc(examId);
+        int cap = Math.max(1, Math.min(200, limit));
+        return candidates.stream()
+                .filter(finding -> examId != null || visible == null
+                        || visible.contains(finding.getExam().getId()))
+                .filter(finding -> type == null || finding.getType() == type)
+                .filter(finding -> status == null || finding.getStatus() == status)
+                .filter(finding -> band == null || finding.getPriorityBand() == band)
+                .limit(cap)
+                .map(this::overviewRow)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -120,6 +158,23 @@ public class FindingQueryService {
                 finding.isCoverageWarning(),
                 evidenceRepository.countByFindingId(finding.getId()),
                 finding.getCreatedAt());
+    }
+
+    private FindingOverviewRow overviewRow(Finding finding) {
+        return new FindingOverviewRow(
+                finding.getId(),
+                finding.getType(),
+                finding.getPriorityScore(),
+                finding.getPriorityBand(),
+                finding.getStatus(),
+                finding.getCandidateA().getCode(),
+                finding.getCandidateB() == null ? null : finding.getCandidateB().getCode(),
+                finding.getSummary(),
+                finding.isCoverageWarning(),
+                evidenceRepository.countByFindingId(finding.getId()),
+                finding.getCreatedAt(),
+                new ExamRef(finding.getExam().getId(), finding.getExam().getCode(),
+                        finding.getExam().getTitle()));
     }
 
     private List<EvidenceView> evidence(Long findingId) {
