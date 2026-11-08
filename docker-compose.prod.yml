@@ -40,6 +40,27 @@ services:
       retries: 10
       start_period: 15s
 
+  runner:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/examguard-runner:${EXAMGUARD_VERSION:-latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    pids_limit: 256
+    networks:
+      - runner_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   backend:
     image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/examguard-backend:${EXAMGUARD_VERSION:-latest}
     restart: unless-stopped
@@ -48,6 +69,11 @@ services:
         condition: service_healthy
       ai:
         condition: service_healthy
+      runner:
+        condition: service_healthy
+    networks:
+      - default
+      - runner_net
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-examguard}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-examguard}
@@ -56,6 +82,7 @@ services:
       JWT_STAFF_TTL_MINUTES: ${JWT_STAFF_TTL_MINUTES:-480}
       JWT_ATTEMPT_TTL_MINUTES: ${JWT_ATTEMPT_TTL_MINUTES:-360}
       ANALYSIS_BASE_URL: http://ai:8000
+      CODE_RUNNER_BASE_URL: http://runner:8000
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in .env}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       SERVER_PORT: 8080
@@ -83,3 +110,7 @@ services:
 
 volumes:
   examguard_mysql:
+
+networks:
+  runner_net:
+    internal: true

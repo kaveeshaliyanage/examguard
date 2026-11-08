@@ -104,6 +104,21 @@ jobs:
           path: ai/authorship-eval.json
           if-no-files-found: ignore
 
+  runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the sandbox image
+        run: docker build -t examguard-runner ./runner
+      - name: Test the sandbox
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/runner/tests:/app/tests:ro" \
+            -v "$PWD/runner/requirements-dev.txt:/app/requirements-dev.txt:ro" \
+            examguard-runner \
+            sh -c 'pip install -q -r requirements-dev.txt && python -m pytest tests -q -p no:cacheprovider'
+
   frontend:
     runs-on: ubuntu-latest
     steps:

@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [backend, ai, frontend]
+        component: [backend, ai, frontend, runner]
     steps:
       - uses: actions/checkout@v4
 
@@ -101,6 +101,7 @@ jobs:
             - `ghcr.io/${{ github.repository_owner }}/examguard-backend:${{ github.ref_name }}`
             - `ghcr.io/${{ github.repository_owner }}/examguard-ai:${{ github.ref_name }}`
             - `ghcr.io/${{ github.repository_owner }}/examguard-frontend:${{ github.ref_name }}`
+            - `ghcr.io/${{ github.repository_owner }}/examguard-runner:${{ github.ref_name }}`
 
             Deploy with `scripts/deploy.sh ${{ github.ref_name }}` on the VPS, or run the
             CD workflow manually with `deploy` enabled.
