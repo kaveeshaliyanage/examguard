@@ -56,6 +56,18 @@ class AuthApiTest extends ApiTestBase {
     }
 
     @Test
+    void studentAccountCannotUseTheStaffLogin() throws Exception {
+        User student = staff(Role.STUDENT);
+
+        mvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("email", student.getEmail(), "password", "TestPassword123!"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Students sign in at the student portal"));
+    }
+
+    @Test
     void studentTokenCannotCallStaffEndpoints() throws Exception {
         User owner = staff(Role.LECTURER);
         Exam exam = exam(owner, "AUTH-" + UUID.randomUUID().toString().substring(0, 8), ExamStatus.OPEN);

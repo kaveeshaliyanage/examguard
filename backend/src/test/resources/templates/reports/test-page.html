@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>PDF smoke page</title>
+    <style>
+        body { font-family: Report; font-size: 11pt; }
+        .mono { font-family: ReportMono; }
+        .bold { font-family: ReportBold; }
+    </style>
+</head>
+<body>
+<h1 class="bold" th:text="${title}">Title</h1>
+<p th:text="${body}">Body</p>
+<p class="mono" th:text="${code}">CODE</p>
+</body>
+</html>

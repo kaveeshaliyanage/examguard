@@ -11,6 +11,7 @@ import com.examguard.domain.ExamStatus;
 import com.examguard.domain.Question;
 import com.examguard.domain.Role;
 import com.examguard.domain.User;
+import com.examguard.dto.AnalysisDtos.AuthorshipCandidatePayload;
 import com.examguard.dto.AnalysisDtos.IncidentCandidatePayload;
 import com.examguard.dto.AnalysisDtos.PairAnalysisRequest;
 import com.examguard.dto.AnalysisDtos.PairCandidatePayload;
@@ -92,6 +93,17 @@ class AnalysisPayloadIsolationTest extends ApiTestBase {
         assertThat(incidentForSecond.toString())
                 .doesNotContain(firstText)
                 .doesNotContain("chegg.com");
+
+        JsonNode authorshipJson = json.valueToTree(payloads.authorship());
+        assertThat(authorshipJson.toString())
+                .doesNotContain("chegg.com", "events", "occurredAt", "domain", "rules");
+        assertThat(payloads.authorship().candidates()).hasSize(2);
+        for (AuthorshipCandidatePayload candidate : payloads.authorship().candidates()) {
+            assertThat(candidate.answers()).hasSize(1);
+        }
+        assertThat(findCandidate(authorshipJson, "ISO-A").toString())
+                .contains(firstText)
+                .doesNotContain(secondText);
     }
 
     private JsonNode findCandidate(JsonNode request, String code) {

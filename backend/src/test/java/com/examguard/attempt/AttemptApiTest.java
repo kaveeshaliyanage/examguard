@@ -1,5 +1,6 @@
 package com.examguard.attempt;
 
+import com.examguard.domain.Attempt;
 import com.examguard.domain.Exam;
 import com.examguard.domain.ExamStatus;
 import com.examguard.domain.Role;
@@ -113,6 +114,11 @@ class AttemptApiTest extends ApiTestBase {
         JsonNode joined = join(exam.getCode(), "S-005");
         long attemptId = joined.get("attemptId").asLong();
         String token = "Bearer " + joined.get("sessionToken").asText();
+        // Coverage is measured from startedAt to now; back-date the attempt so the short event
+        // burst is unambiguously below the warning threshold instead of depending on the clock.
+        Attempt attempt = attemptRepository.findById(attemptId).orElseThrow();
+        attempt.setStartedAt(Instant.now().minusSeconds(3600));
+        attemptRepository.save(attempt);
         String now = Instant.now().toString();
 
         List<Map<String, Object>> events = List.of(
