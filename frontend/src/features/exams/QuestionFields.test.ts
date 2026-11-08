@@ -46,4 +46,23 @@ describe('question authoring validation', () => {
     question.points = 0;
     expect(validateQuestion(question, 0)).toMatch(/points greater than zero/);
   });
+
+  it('requires a test case or a reference solution for coding questions', () => {
+    const question = emptyQuestion('CODE');
+    question.prompt = 'Read two integers and print their sum.';
+    expect(validateQuestion(question, 0)).toMatch(/at least one test case/);
+    question.answerKey = {
+      tests: [{ name: 'Case 1', input: '1 2', expectedOutput: '3', hidden: false }],
+    };
+    expect(validateQuestion(question, 0)).toBeNull();
+  });
+
+  it('rejects a coding test case without expected output', () => {
+    const question = emptyQuestion('CODE');
+    question.prompt = 'Print the sum.';
+    question.answerKey = {
+      tests: [{ name: 'Case 1', input: '1 2', expectedOutput: '   ', hidden: false }],
+    };
+    expect(validateQuestion(question, 0)).toMatch(/without expected output/);
+  });
 });

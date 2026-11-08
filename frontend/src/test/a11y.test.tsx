@@ -201,6 +201,7 @@ describe('accessibility smoke checks', () => {
   it('renders the admin dashboard without structural violations', async () => {
     signInStaff('ADMIN');
     server.use(
+      http.get('/api/findings', () => HttpResponse.json([])),
       http.get('/api/dashboard/admin', () =>
         HttpResponse.json({
           counts: { users: 42, students: 35, lecturers: 6, admins: 1, exams: 4, attempts: 120, findings: 9 },

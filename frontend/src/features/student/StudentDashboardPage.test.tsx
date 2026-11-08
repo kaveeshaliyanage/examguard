@@ -112,4 +112,49 @@ describe('StudentDashboardPage', () => {
     expect(await screen.findByRole('heading', { name: 'Student portal' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
+
+  it('keeps unreleased results locked with an explanatory toast', async () => {
+    const user = userEvent.setup();
+    writeStudentSession({
+      token: 'student-token',
+      user: { id: 5, email: 'sam@example.edu', displayName: 'Sam Student' },
+    });
+    server.use(
+      http.get('/api/dashboard/student', () =>
+        HttpResponse.json({
+          profile: { id: 5, email: 'sam@example.edu', displayName: 'Sam Student' },
+          stats: {
+            totalAttempts: 1,
+            submitted: 1,
+            terminated: 0,
+            released: 0,
+            averagePercentage: null,
+            strikesThisTerm: 0,
+          },
+          upcoming: [],
+          attempts: [
+            {
+              attemptId: 9,
+              examCode: 'MARK-101',
+              examTitle: 'Marketing Midterm',
+              status: 'SUBMITTED',
+              startedAt: '2026-11-01T09:00:00Z',
+              submittedAt: '2026-11-01T10:00:00Z',
+              scorePoints: null,
+              maxPoints: 100,
+              released: false,
+              strikes: 0,
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderRoute(<StudentDashboardPage />, { path: '/student', initialEntry: '/student' });
+
+    await user.click(await screen.findByText('Marketing Midterm'));
+    expect(
+      await screen.findByText(/Marks are not released yet/),
+    ).toBeInTheDocument();
+  });
 });

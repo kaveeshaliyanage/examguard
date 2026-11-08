@@ -36,10 +36,64 @@ describe('StudentReportPage', () => {
     expect(screen.getByText(/Returned to the exam window/)).toBeInTheDocument();
     expect(screen.getByText('1 / 3 strikes')).toBeInTheDocument();
 
-    expect(screen.getAllByText('Review aid, not proof').length).toBeGreaterThan(0);
+    // Overlap and authorship signals are staff review aids; students never see them.
+    expect(screen.queryByText('Review signals')).not.toBeInTheDocument();
+    expect(screen.queryByText('Review aid, not proof')).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Moderate phrase overlap with another candidate/),
-    ).toBeInTheDocument();
+      screen.queryByText(/Moderate phrase overlap with another candidate/),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
+  });
+
+  it('renders a coding answer with its test results', async () => {
+    writeAttemptSession({
+      attemptId: 1,
+      sessionToken: 'attempt-token',
+      collectorToken: 'collector-token',
+      candidateCode: 'C001',
+      examCode: 'DEMO-101',
+    });
+    server.use(
+      http.get('/api/reports/attempts/1', () =>
+        HttpResponse.json({
+          ...attemptReportFixture,
+          questions: [
+            {
+              prompt: 'Read two integers and print their sum.',
+              type: 'CODE',
+              points: 10,
+              awardedPoints: 7.5,
+              answerText: 'a, b = map(int, input().split())\nprint(a + b)',
+              selectedOptions: [],
+              correctKeys: null,
+              explanation: null,
+              codeLanguage: 'PYTHON',
+              codeDetail: {
+                language: 'PYTHON',
+                passed: 3,
+                total: 4,
+                tests: [
+                  { name: 'Case 1', passed: true, status: 'PASSED', hidden: false, durationMs: 14 },
+                  { name: 'Case 2', passed: true, status: 'PASSED', hidden: false, durationMs: 11 },
+                  { name: 'Case 3', passed: true, status: 'PASSED', hidden: false, durationMs: 12 },
+                  { name: 'Hidden edge case', passed: false, status: 'FAILED', hidden: true, durationMs: 10 },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderRoute(<StudentReportPage />, {
+      path: '/attempt/:attemptId/report',
+      initialEntry: '/attempt/1/report',
+    });
+
+    expect(await screen.findByText(/Your solution · Python/)).toBeInTheDocument();
+    expect(screen.getByText('Test results')).toBeInTheDocument();
+    expect(screen.getByText('3 of 4 passed')).toBeInTheDocument();
+    expect(screen.getByText('Hidden edge case')).toBeInTheDocument();
+    expect(screen.getByText('Wrong output')).toBeInTheDocument();
   });
 });

@@ -137,4 +137,61 @@ describe('GradingTab', () => {
     await user.keyboard('{ArrowDown}');
     expect(screen.getByText(/Candidate 1 of 2/)).toBeInTheDocument();
   });
+
+  it('shows coding results and re-runs the hidden tests', async () => {
+    const user = userEvent.setup();
+    let judgeCalls = 0;
+    const codeRow: GradingRow = {
+      attemptId: 33,
+      candidateCode: 'C-CODE',
+      questionId: 301,
+      prompt: 'Read two integers and print their sum.',
+      type: 'CODE',
+      points: 10,
+      text: 'a, b = map(int, input().split())\nprint(a + b)',
+      selectedOptions: [],
+      revisionNo: 1,
+      savedAt: '2026-11-06T09:55:00Z',
+      answerKey: {
+        tests: [
+          { name: 'Basic', input: '1 2', expectedOutput: '3', hidden: false },
+          { name: 'Big', input: '999 1', expectedOutput: '1000', hidden: true },
+        ],
+      },
+      explanation: null,
+      awardedPoints: 5,
+      comment: 'Auto-judged: 1 of 2 test cases passed.',
+      detail: {
+        language: 'PYTHON',
+        passed: 1,
+        total: 2,
+        tests: [
+          { name: 'Basic', passed: true, status: 'PASSED', hidden: false, durationMs: 12 },
+          { name: 'Big', passed: false, status: 'FAILED', hidden: true, durationMs: 9 },
+        ],
+      },
+    };
+    writeStaffSession({
+      token: 'staff-token',
+      user: { id: 2, email: 'lee@example.edu', displayName: 'Lee Lecturer', role: 'LECTURER' },
+    });
+    server.use(
+      http.get('/api/exams/11/grading', () => HttpResponse.json([codeRow])),
+      http.post('/api/exams/11/code-judge', () => {
+        judgeCalls += 1;
+        return HttpResponse.json({ attemptsJudged: 1, questionsJudged: 1 });
+      }),
+    );
+
+    renderRoute(<GradingTab exam={exam} canReview />, { path: '/exams/:examId', initialEntry: '/exams/11' });
+
+    expect(await screen.findByText('Submitted code')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 passed/)).toBeInTheDocument();
+    expect(screen.getByText(/Big · hidden/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Re-run code judging' }));
+
+    await waitFor(() => expect(judgeCalls).toBe(1));
+    expect(await screen.findByText(/Re-ran code judging: 1 answer/)).toBeInTheDocument();
+  });
 });
