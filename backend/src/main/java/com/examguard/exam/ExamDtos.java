@@ -33,8 +33,8 @@ public final class ExamDtos {
             BigDecimal points,
             GradingMode gradingMode,
             @Min(0) @Max(5000) Integer maxWords,
-            Content content,
-            AnswerKey answerKey,
+            @Valid Content content,
+            @Valid AnswerKey answerKey,
             @Size(max = 8000) String explanation) {
     }
 

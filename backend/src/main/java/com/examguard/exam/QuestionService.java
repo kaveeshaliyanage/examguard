@@ -1,5 +1,6 @@
 package com.examguard.exam;
 
+import com.examguard.domain.CodeLanguage;
 import com.examguard.domain.Exam;
 import com.examguard.domain.GradingMode;
 import com.examguard.domain.Question;
@@ -7,6 +8,7 @@ import com.examguard.domain.QuestionType;
 import com.examguard.exam.ExamDtos.QuestionPayload;
 import com.examguard.exam.ExamDtos.StaffQuestionView;
 import com.examguard.exam.QuestionPayloads.AnswerKey;
+import com.examguard.exam.QuestionPayloads.CodeTest;
 import com.examguard.exam.QuestionPayloads.Content;
 import com.examguard.exam.QuestionPayloads.Option;
 import com.examguard.repo.ExamRepository;
@@ -35,7 +37,8 @@ public class QuestionService {
     private static final Set<QuestionType> CHOICE_TYPES =
             EnumSet.of(QuestionType.SINGLE_CHOICE, QuestionType.MULTI_CHOICE);
     private static final Set<QuestionType> AUTO_TYPES =
-            EnumSet.of(QuestionType.SINGLE_CHOICE, QuestionType.MULTI_CHOICE, QuestionType.TRUE_FALSE);
+            EnumSet.of(QuestionType.SINGLE_CHOICE, QuestionType.MULTI_CHOICE, QuestionType.TRUE_FALSE,
+                    QuestionType.CODE);
     private static final BigDecimal MAX_POINTS = new BigDecimal("100");
     private static final BigDecimal DEFAULT_POINTS = new BigDecimal("1.00");
     private static final int DEFAULT_MAX_WORDS = 500;
@@ -162,10 +165,12 @@ public class QuestionService {
                     "Question points must be greater than 0 and at most 100");
         }
 
-        GradingMode mode = payload.gradingMode() == null ? GradingMode.MANUAL : payload.gradingMode();
+        GradingMode mode = payload.gradingMode() == null
+                ? defaultMode(type, payload.answerKey())
+                : payload.gradingMode();
         if (mode == GradingMode.AUTO && !AUTO_TYPES.contains(type)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "AUTO grading is only valid for choice and true/false questions");
+                    "Automatic grading is only valid for choice, true/false and coding questions");
         }
 
         boolean freeText = type == QuestionType.SHORT_ANSWER || type == QuestionType.ESSAY;
@@ -173,7 +178,7 @@ public class QuestionService {
 
         Set<String> optionKeys = applyContent(question, type, payload);
         if (typed) {
-            applyAnswerKey(question, type, optionKeys, payload.answerKey());
+            applyAnswerKey(question, type, optionKeys, payload.answerKey(), mode);
         } else {
             question.setAnswerKeyJson(null);
         }
@@ -187,6 +192,17 @@ public class QuestionService {
     }
 
     private Set<String> applyContent(Question question, QuestionType type, QuestionPayload payload) {
+        if (type == QuestionType.CODE) {
+            Content content = payload.content();
+            CodeLanguage language = content == null ? null : content.language();
+            if (language == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Coding questions need a language");
+            }
+            question.setContentJson(questionJson.write(
+                    new Content(null, language, trimToNull(content.starterCode()))));
+            return Set.of();
+        }
         if (!CHOICE_TYPES.contains(type)) {
             question.setContentJson("{}");
             return Set.of();
@@ -212,7 +228,8 @@ public class QuestionService {
         return keys;
     }
 
-    private void applyAnswerKey(Question question, QuestionType type, Set<String> optionKeys, AnswerKey key) {
+    private void applyAnswerKey(Question question, QuestionType type, Set<String> optionKeys,
+                                AnswerKey key, GradingMode mode) {
         if (key == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An answer key is required for this question");
         }
@@ -222,6 +239,7 @@ public class QuestionService {
         List<String> accepted = key.acceptedAnswers() == null
                 ? List.of()
                 : key.acceptedAnswers().stream().filter(value -> value != null && !value.isBlank()).toList();
+        List<CodeTest> tests = type == QuestionType.CODE ? normalizeTests(key.tests()) : List.of();
 
         switch (type) {
             case SINGLE_CHOICE, MULTI_CHOICE -> {
@@ -252,9 +270,56 @@ public class QuestionService {
                             "Essay questions need a rubric or a model answer");
                 }
             }
+            case CODE -> {
+                if (tests.isEmpty() && isBlank(key.modelAnswer()) && isBlank(key.rubric())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Coding questions need test cases, or a reference solution for manual marking");
+                }
+                if (tests.isEmpty() && mode == GradingMode.AUTO) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Automatic grading needs at least one test case");
+                }
+            }
         }
-        question.setAnswerKeyJson(questionJson.write(
-                new AnswerKey(selected, accepted, trimToNull(key.modelAnswer()), trimToNull(key.rubric()))));
+        question.setAnswerKeyJson(questionJson.write(new AnswerKey(
+                selected, accepted, trimToNull(key.modelAnswer()), trimToNull(key.rubric()),
+                tests.isEmpty() ? null : tests)));
+    }
+
+    private GradingMode defaultMode(QuestionType type, AnswerKey key) {
+        if (type != QuestionType.CODE || key == null || key.tests() == null) {
+            return GradingMode.MANUAL;
+        }
+        // A coding question is authored with its tests; without this the hidden-test judge would skip it.
+        boolean usableTest = key.tests().stream()
+                .anyMatch(test -> test != null && test.expectedOutput() != null && !test.expectedOutput().isBlank());
+        return usableTest ? GradingMode.AUTO : GradingMode.MANUAL;
+    }
+
+    private List<CodeTest> normalizeTests(List<CodeTest> tests) {
+        if (tests == null) {
+            return List.of();
+        }
+        if (tests.size() > 20) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "A coding question can have at most 20 test cases");
+        }
+        List<CodeTest> normalized = new ArrayList<>();
+        for (int index = 0; index < tests.size(); index++) {
+            CodeTest test = tests.get(index);
+            if (test == null) {
+                continue;
+            }
+            String expected = test.expectedOutput() == null ? "" : test.expectedOutput();
+            if (expected.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Test case " + (index + 1) + " needs an expected output");
+            }
+            String name = isBlank(test.name()) ? "Case " + (index + 1) : test.name().trim();
+            normalized.add(new CodeTest(name, test.input() == null ? "" : test.input(), expected,
+                    Boolean.TRUE.equals(test.hidden())));
+        }
+        return normalized;
     }
 
     private int nextOrderIndex(Long examId) {

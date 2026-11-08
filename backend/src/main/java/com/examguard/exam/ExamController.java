@@ -13,6 +13,8 @@ import com.examguard.exam.ExamDtos.RosterEntryView;
 import com.examguard.exam.ExamDtos.StaffQuestionView;
 import com.examguard.exam.ExamDtos.StatusRequest;
 import com.examguard.exam.ExamDtos.UpdateExamRequest;
+import com.examguard.judge.CodeJudgeService;
+import com.examguard.judge.CodeRunnerDtos.CodeJudgeSummary;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -35,10 +37,13 @@ public class ExamController {
 
     private final ExamService examService;
     private final QuestionService questionService;
+    private final CodeJudgeService codeJudgeService;
 
-    public ExamController(ExamService examService, QuestionService questionService) {
+    public ExamController(ExamService examService, QuestionService questionService,
+                          CodeJudgeService codeJudgeService) {
         this.examService = examService;
         this.questionService = questionService;
+        this.codeJudgeService = codeJudgeService;
     }
 
     @GetMapping
@@ -70,6 +75,11 @@ public class ExamController {
                                      @PathVariable Long examId,
                                      @Valid @RequestBody UpdateExamRequest request) {
         return examService.updateSettings(authentication, examId, request);
+    }
+
+    @PostMapping("/{examId}/code-judge")
+    public CodeJudgeSummary judgeCode(Authentication authentication, @PathVariable Long examId) {
+        return codeJudgeService.judgeExam(authentication, examId);
     }
 
     @GetMapping("/{examId}/roster")

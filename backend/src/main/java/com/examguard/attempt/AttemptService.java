@@ -9,6 +9,7 @@ import com.examguard.domain.AnswerRevision;
 import com.examguard.domain.Attempt;
 import com.examguard.domain.AttemptStatus;
 import com.examguard.domain.Question;
+import com.examguard.domain.QuestionType;
 import com.examguard.grading.GradingService;
 import com.examguard.repo.AnswerRevisionRepository;
 import com.examguard.repo.AttemptRepository;
@@ -84,7 +85,7 @@ public class AttemptService {
         Question question = questionRepository.findByIdAndExamId(questionId, attempt.getExam().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Question not found"));
 
-        String text = request.text() == null ? "" : TextNormalizer.normalize(request.text());
+        String text = normalizeAnswer(question, request.text());
         List<String> selectedOptions = normalizeOptions(request.selectedOptions());
         String selectedJson = answerJson.write(selectedOptions);
 
@@ -135,10 +136,22 @@ public class AttemptService {
     }
 
     private boolean isUnchanged(AnswerRevision latest, String text, List<String> selectedOptions) {
-        boolean sameText = Objects.equals(TextNormalizer.normalize(latest.getText()), text);
+        boolean sameText = Objects.equals(
+                normalizeAnswer(latest.getQuestion(), latest.getText()), text);
         boolean sameOptions = answerJson.asSet(latest.getSelectedOptions())
                 .equals(new LinkedHashSet<>(selectedOptions));
         return sameText && sameOptions;
+    }
+
+    /**
+     * Prose is whitespace-collapsed, but code keeps its layout: indentation and line breaks are
+     * part of the answer and must reach the judge byte for byte.
+     */
+    private static String normalizeAnswer(Question question, String text) {
+        if (question.getType() == QuestionType.CODE) {
+            return text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n');
+        }
+        return TextNormalizer.normalize(text);
     }
 
     private List<String> normalizeOptions(List<String> selectedOptions) {
@@ -160,10 +173,13 @@ public class AttemptService {
     }
 
     private SaveAnswerResponse response(AnswerRevision revision, String submittedText) {
+        int words = revision.getQuestion().getType() == QuestionType.CODE
+                ? 0
+                : TextNormalizer.wordCount(submittedText);
         return new SaveAnswerResponse(
                 revision.getQuestion().getId(),
                 revision.getRevisionNo(),
                 revision.getSavedAt(),
-                TextNormalizer.wordCount(submittedText));
+                words);
     }
 }

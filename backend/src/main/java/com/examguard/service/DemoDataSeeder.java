@@ -37,6 +37,7 @@ public class DemoDataSeeder implements CommandLineRunner {
     private final DemoExamSeeder examSeeder;
     private final DemoAttemptSeeder attemptSeeder;
     private final DemoTypedExamSeeder typedExamSeeder;
+    private final DemoCodeExamSeeder codeExamSeeder;
     private final boolean enabled;
 
     public DemoDataSeeder(
@@ -47,6 +48,7 @@ public class DemoDataSeeder implements CommandLineRunner {
             DemoExamSeeder examSeeder,
             DemoAttemptSeeder attemptSeeder,
             DemoTypedExamSeeder typedExamSeeder,
+            DemoCodeExamSeeder codeExamSeeder,
             @Value("${app.seed-demo-data:true}") boolean enabled) {
         this.userRepository = userRepository;
         this.examRepository = examRepository;
@@ -55,6 +57,7 @@ public class DemoDataSeeder implements CommandLineRunner {
         this.examSeeder = examSeeder;
         this.attemptSeeder = attemptSeeder;
         this.typedExamSeeder = typedExamSeeder;
+        this.codeExamSeeder = codeExamSeeder;
         this.enabled = enabled;
     }
 
@@ -75,6 +78,9 @@ public class DemoDataSeeder implements CommandLineRunner {
         }
         if (examRepository.findByCodeIgnoreCase(DemoTypedExamSeeder.EXAM_CODE).isEmpty()) {
             seedTypedExam(admin, lecturer, reviewer, student);
+        }
+        if (examRepository.findByCodeIgnoreCase(DemoCodeExamSeeder.EXAM_CODE).isEmpty()) {
+            seedCodeExam(admin, lecturer, reviewer);
         }
     }
 
@@ -101,6 +107,16 @@ public class DemoDataSeeder implements CommandLineRunner {
 
         log.info("Seeded demo exam {} with five question types. Student login: student@examguard.local / Student123!",
                 typed.exam().getCode());
+    }
+
+    private void seedCodeExam(User admin, User lecturer, User reviewer) {
+        DemoCodeExamSeeder.SeededCodeExam coded = codeExamSeeder.seed(lecturer, reviewer);
+
+        audit(admin, coded.exam().getId(), "DEMO_CODE_EXAM_SEEDED",
+                "{\"candidateCodes\":[\"C201\",\"C202\"],\"note\":\"scripted coding scenarios\"}");
+
+        log.info("Seeded demo exam {} with three coding questions. The enrolled student can join it from the dashboard.",
+                coded.exam().getCode());
     }
 
     private void audit(User admin, Long examId, String action, String detailJson) {

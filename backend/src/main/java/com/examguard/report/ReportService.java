@@ -8,10 +8,13 @@ import com.examguard.domain.Exam;
 import com.examguard.domain.Finding;
 import com.examguard.domain.IntegrityEvent;
 import com.examguard.domain.Question;
+import com.examguard.domain.QuestionType;
 import com.examguard.domain.Role;
 import com.examguard.domain.User;
 import com.examguard.exam.QuestionJson;
 import com.examguard.exam.QuestionPayloads.AnswerKey;
+import com.examguard.judge.CodeGradeDetails;
+import com.examguard.judge.CodeRunnerDtos.CodeGradeDetail;
 import com.examguard.repo.AnswerGradeRepository;
 import com.examguard.repo.AnswerRevisionRepository;
 import com.examguard.repo.AttemptRepository;
@@ -72,6 +75,7 @@ public class ReportService {
     private final FindingRepository findingRepository;
     private final UserRepository userRepository;
     private final QuestionJson questionJson;
+    private final CodeGradeDetails codeGradeDetails;
     private final AccessService accessService;
     private final AnalysisClient analysisClient;
     private final PdfRenderer pdfRenderer;
@@ -87,6 +91,7 @@ public class ReportService {
             FindingRepository findingRepository,
             UserRepository userRepository,
             QuestionJson questionJson,
+            CodeGradeDetails codeGradeDetails,
             AccessService accessService,
             AnalysisClient analysisClient,
             PdfRenderer pdfRenderer,
@@ -100,6 +105,7 @@ public class ReportService {
         this.findingRepository = findingRepository;
         this.userRepository = userRepository;
         this.questionJson = questionJson;
+        this.codeGradeDetails = codeGradeDetails;
         this.accessService = accessService;
         this.analysisClient = analysisClient;
         this.pdfRenderer = pdfRenderer;
@@ -121,6 +127,10 @@ public class ReportService {
             AnswerRevision revision = latest.get(question.getId());
             AnswerGrade grade = grades.get(question.getId());
             AnswerKey key = released ? questionJson.answerKey(question) : null;
+            boolean code = question.getType() == QuestionType.CODE;
+            CodeGradeDetail codeDetail = released && grade != null
+                    ? codeGradeDetails.parse(grade.getDetailJson())
+                    : null;
             questionReports.add(new QuestionReport(
                     question.getOrderIndex(),
                     question.getPrompt(),
@@ -131,7 +141,9 @@ public class ReportService {
                     revision == null ? List.of() : selectedOptions(revision),
                     key == null || key.selectedKeys() == null ? List.of() : key.selectedKeys(),
                     grade == null ? null : grade.getComment(),
-                    released ? question.getExplanation() : null));
+                    released ? question.getExplanation() : null,
+                    code ? questionJson.content(question).path("language").asText(null) : null,
+                    codeDetail));
         }
 
         List<IntegrityEvent> events = integrityRepository.findByAttemptIdOrderByOccurredAtAsc(attemptId);
@@ -155,7 +167,8 @@ public class ReportService {
                 attempt.getSubmittedAt(),
                 questionReports,
                 integrity,
-                reviewSignals(attempt));
+                // Overlap and authorship signals are staff review aids; students never see them.
+                accessService.isStaff(auth) ? reviewSignals(attempt) : List.of());
     }
 
     @Transactional(readOnly = true)
@@ -195,6 +208,16 @@ public class ReportService {
             row.put("correctKeys", question.correctKeys());
             row.put("comment", question.comment());
             row.put("explanation", question.explanation());
+            row.put("codeLanguage", question.codeLanguage());
+            row.put("codeTests", question.codeDetail() == null
+                    ? List.of()
+                    : question.codeDetail().tests().stream().map(test -> {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("name", test.hidden() ? "Hidden case" : test.name());
+                        item.put("result", test.passed() ? "Passed" : statusLabel(test.status()));
+                        item.put("cssClass", test.passed() ? "ok" : "bad");
+                        return item;
+                    }).toList());
             questions.add(row);
         }
         model.put("questions", questions);
@@ -419,7 +442,8 @@ public class ReportService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam not found"));
     }
 
-    private Attempt requireAttempt(Authentication auth, Long attemptId) {        Attempt attempt = accessService.requireAttemptAccess(auth, attemptId);
+    private Attempt requireAttempt(Authentication auth, Long attemptId) {
+        Attempt attempt = accessService.requireAttemptAccess(auth, attemptId);
         if ("STUDENT".equals(accessService.role(auth)) && attempt.getReleasedAt() == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Results have not been released yet");
         }
@@ -513,7 +537,19 @@ public class ReportService {
             case "TRUE_FALSE" -> "True / false";
             case "SHORT_ANSWER" -> "Short answer";
             case "ESSAY" -> "Essay";
+            case "CODE" -> "Coding";
             default -> type;
+        };
+    }
+
+    private static String statusLabel(String status) {
+        return switch (status == null ? "" : status) {
+            case "TIMEOUT" -> "Timed out";
+            case "COMPILE_ERROR" -> "Did not compile";
+            case "RUNTIME_ERROR" -> "Runtime error";
+            case "LIMIT_EXCEEDED" -> "Resource limit";
+            case "NOT_RUN" -> "Not run";
+            default -> "Failed";
         };
     }
 

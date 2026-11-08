@@ -1,5 +1,7 @@
 package com.examguard.report;
 
+import com.examguard.judge.CodeRunnerDtos.CodeGradeDetail;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -19,7 +21,9 @@ public final class ReportDtos {
             List<String> selectedOptions,
             List<String> correctKeys,
             String comment,
-            String explanation) {
+            String explanation,
+            String codeLanguage,
+            CodeGradeDetail codeDetail) {
     }
 
     public record IntegritySignal(String signal, Instant occurredAt) {

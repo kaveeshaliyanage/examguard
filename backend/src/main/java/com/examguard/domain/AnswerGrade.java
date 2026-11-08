@@ -46,6 +46,10 @@ public class AnswerGrade {
     @Column(columnDefinition = "text")
     private String comment;
 
+    /** Per-test results for auto-judged coding answers; null for every other question type. */
+    @Column(name = "detail_json", columnDefinition = "text")
+    private String detailJson;
+
     @Column(name = "graded_at", nullable = false)
     private Instant gradedAt;
 }

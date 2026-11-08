@@ -27,6 +27,7 @@
         .q-head .points { font-family: ReportBold; color: #1f2430; }
         .prompt { font-family: ReportBold; margin: 3pt 0; }
         .answer { background: #f7f9fc; border-left: 2pt solid #c7d2fe; padding: 5pt 7pt; margin: 4pt 0; white-space: pre-wrap; }
+        .answer.code { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; font-size: 8.5pt; }
         .empty { color: #9aa1ad; font-style: italic; }
         .line { margin-top: 3pt; font-size: 9pt; }
         .label { color: #6b7280; }
@@ -77,7 +78,8 @@
     </div>
     <div class="prompt" th:text="${q.prompt}">Prompt</div>
 
-    <div class="answer" th:if="${q.answerText != null and !q.answerText.isEmpty()}"
+    <div class="answer" th:classappend="${q.codeLanguage != null} ? 'code'"
+         th:if="${q.answerText != null and !q.answerText.isEmpty()}"
          th:text="${q.answerText}">Answer</div>
     <div class="answer"
          th:if="${(q.answerText == null or q.answerText.isEmpty()) and q.selectedOptions != null and !q.selectedOptions.isEmpty()}"
@@ -91,6 +93,18 @@
         <span class="label">Correct: </span>
         <span th:text="${#strings.listJoin(q.correctKeys, ', ')}">B</span>
     </div>
+
+    <table th:if="${q.codeTests != null and !q.codeTests.isEmpty()}" style="margin-top: 4pt;">
+        <thead>
+        <tr><th>Test case</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="t : ${q.codeTests}">
+            <td th:text="${t.name}">Case 1</td>
+            <td><span class="badge" th:classappend="${t.cssClass}" th:text="${t.result}">Passed</span></td>
+        </tr>
+        </tbody>
+    </table>
 
     <div class="comment" th:if="${q.comment != null and !q.comment.isEmpty()}" th:text="${q.comment}">Comment</div>
     <div class="explanation" th:if="${released and q.explanation != null and !q.explanation.isEmpty()}"

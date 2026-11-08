@@ -1,6 +1,7 @@
 package com.examguard.grading;
 
 import com.examguard.domain.QuestionType;
+import com.examguard.judge.CodeRunnerDtos.CodeGradeDetail;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
@@ -29,7 +30,8 @@ public final class GradingDtos {
             JsonNode answerKey,
             String explanation,
             BigDecimal awardedPoints,
-            String comment) {
+            String comment,
+            CodeGradeDetail detail) {
     }
 
     public record GradeRequest(

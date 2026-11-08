@@ -14,6 +14,7 @@ import com.examguard.grading.GradingDtos.GradeRequest;
 import com.examguard.grading.GradingDtos.GradeResponse;
 import com.examguard.grading.GradingDtos.GradingRow;
 import com.examguard.grading.GradingDtos.ReleaseResponse;
+import com.examguard.judge.CodeGradeDetails;
 import com.examguard.repo.AnswerGradeRepository;
 import com.examguard.repo.AnswerRevisionRepository;
 import com.examguard.repo.AttemptRepository;
@@ -31,6 +32,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +52,7 @@ public class GradingService {
     private final AnswerJson answerJson;
     private final AccessService accessService;
     private final AuditService auditService;
+    private final CodeGradeDetails codeGradeDetails;
 
     public GradingService(
             AttemptRepository attemptRepository,
@@ -59,7 +62,8 @@ public class GradingService {
             QuestionJson questionJson,
             AnswerJson answerJson,
             AccessService accessService,
-            AuditService auditService) {
+            AuditService auditService,
+            CodeGradeDetails codeGradeDetails) {
         this.attemptRepository = attemptRepository;
         this.questionRepository = questionRepository;
         this.revisionRepository = revisionRepository;
@@ -68,6 +72,7 @@ public class GradingService {
         this.answerJson = answerJson;
         this.accessService = accessService;
         this.auditService = auditService;
+        this.codeGradeDetails = codeGradeDetails;
     }
 
     @Transactional
@@ -138,7 +143,8 @@ public class GradingService {
                         questionJson.answerKeyNode(question),
                         question.getExplanation(),
                         grade == null ? null : grade.getAwardedPoints(),
-                        grade == null ? null : grade.getComment()));
+                        grade == null ? null : grade.getComment(),
+                        grade == null ? null : codeGradeDetails.parse(grade.getDetailJson())));
             }
         }
         return rows;
@@ -184,9 +190,21 @@ public class GradingService {
     @Transactional
     public ReleaseResponse release(Authentication auth, Long examId) {
         accessService.requireExamOwner(auth, examId);
+        List<Question> questions = questionRepository.findByExamIdOrderByOrderIndexAsc(examId);
+        List<Attempt> attempts = attemptRepository.findByExamIdAndGradedAtIsNotNull(examId);
+        long incomplete = attempts.stream()
+                .filter(attempt -> attempt.getReleasedAt() == null)
+                .filter(attempt -> hasUngradedAnswers(attempt, questions))
+                .count();
+        if (incomplete > 0) {
+            // A release is irreversible, so a partial score must never reach a student.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, incomplete
+                    + (incomplete == 1 ? " attempt still has" : " attempts still have")
+                    + " ungraded answers. Score every answer before releasing.");
+        }
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         int released = 0;
-        for (Attempt attempt : attemptRepository.findByExamIdAndGradedAtIsNotNull(examId)) {
+        for (Attempt attempt : attempts) {
             if (attempt.getReleasedAt() == null) {
                 attempt.setReleasedAt(now);
                 released++;
@@ -195,6 +213,22 @@ public class GradingService {
         auditService.record(accessService.currentUser(auth), examId, "GRADES_RELEASED",
                 "EXAM", examId, Map.of("releasedAttempts", released));
         return new ReleaseResponse(released);
+    }
+
+    private boolean hasUngradedAnswers(Attempt attempt, List<Question> questions) {
+        Set<Long> scored = new HashSet<>();
+        for (AnswerGrade grade : gradeRepository.findByAttemptId(attempt.getId())) {
+            if (grade.getAwardedPoints() != null) {
+                scored.add(grade.getQuestion().getId());
+            }
+        }
+        return questions.stream().anyMatch(question -> !scored.contains(question.getId()));
+    }
+
+    /** Recomputes score and maximum after grades written outside this service (code judging). */
+    @Transactional
+    public void recomputeTotals(Attempt attempt) {
+        recomputeTotals(attempt, null);
     }
 
     private void recomputeTotals(Attempt attempt, Instant gradedAt) {

@@ -6,6 +6,7 @@ import com.examguard.domain.Attempt;
 import com.examguard.domain.AttemptStatus;
 import com.examguard.domain.Exam;
 import com.examguard.domain.Question;
+import com.examguard.domain.QuestionType;
 import com.examguard.domain.ResourceRule;
 import com.examguard.dto.AnalysisDtos.AnswerPayload;
 import com.examguard.dto.AnalysisDtos.AuthorshipAnswerPayload;
@@ -70,9 +71,15 @@ public class AnalysisPayloadBuilder {
 
     public Payloads build(Exam exam, String modelVersion) {
         List<Question> questions = questionRepository.findByExamIdOrderByOrderIndexAsc(exam.getId());
+        // A correct solution is naturally the same for every candidate. Comparing code across
+        // candidates would turn good answers into apparent collusion, so code stays out of the
+        // pair and authorship models. Activity events are unaffected.
+        List<Question> proseQuestions = questions.stream()
+                .filter(question -> question.getType() != QuestionType.CODE)
+                .toList();
         List<Attempt> attempts = attemptRepository
                 .findByExamIdAndStatusWithCandidate(exam.getId(), AttemptStatus.SUBMITTED);
-        List<QuestionPayload> questionPayloads = questions.stream()
+        List<QuestionPayload> questionPayloads = proseQuestions.stream()
                 .map(question -> new QuestionPayload(question.getId(), question.getPrompt()))
                 .toList();
 
@@ -82,8 +89,9 @@ public class AnalysisPayloadBuilder {
         for (Attempt attempt : attempts) {
             Map<Long, List<RevisionPayload>> revisionsByQuestion = revisionsByQuestion(attempt.getId());
             List<AnswerPayload> answers = answerPayloads(questions, revisionsByQuestion);
+            List<AnswerPayload> proseAnswers = answerPayloads(proseQuestions, revisionsByQuestion);
             pairCandidates.add(new PairCandidatePayload(
-                    attempt.getCandidate().getCode(), attempt.getId(), answers));
+                    attempt.getCandidate().getCode(), attempt.getId(), proseAnswers));
             incidentCandidates.add(new IncidentCandidatePayload(
                     attempt.getCandidate().getCode(),
                     attempt.getId(),
@@ -94,7 +102,7 @@ public class AnalysisPayloadBuilder {
                     exam.getDurationMinutes(),
                     attempt.isExtensionConnected()));
             authorshipCandidates.add(new AuthorshipCandidatePayload(
-                    attempt.getCandidate().getCode(), attempt.getId(), authorshipAnswers(answers)));
+                    attempt.getCandidate().getCode(), attempt.getId(), authorshipAnswers(proseAnswers)));
         }
 
         PairAnalysisRequest pairRequest = new PairAnalysisRequest(
