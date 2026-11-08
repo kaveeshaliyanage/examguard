@@ -46,6 +46,9 @@ public class SecurityConfig {
                 .formLogin(f -> f.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/student/auth/register",
+                                "/api/student/auth/login").permitAll()
                         .requestMatchers(
                                 "/api/health",
                                 "/api/auth/login",

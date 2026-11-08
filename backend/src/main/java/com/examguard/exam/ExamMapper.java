@@ -1,14 +1,15 @@
 package com.examguard.exam;
 
 import com.examguard.domain.Exam;
+import com.examguard.domain.ExamEnrollment;
 import com.examguard.domain.ExamPermission;
-import com.examguard.domain.Question;
 import com.examguard.domain.ResourceRule;
-import com.examguard.dto.CommonDtos.ExamQuestionView;
 import com.examguard.exam.ExamDtos.ExamDetail;
 import com.examguard.exam.ExamDtos.ExamSummary;
 import com.examguard.exam.ExamDtos.PermissionView;
+import com.examguard.exam.ExamDtos.RosterEntryView;
 import com.examguard.exam.ExamDtos.RuleView;
+import com.examguard.exam.ExamDtos.StaffQuestionView;
 
 import java.time.Instant;
 import java.util.List;
@@ -23,15 +24,10 @@ final class ExamMapper {
             long submittedCount,
             long findingCount,
             long openFindingCount,
-            Instant lastAnalysisAt) {
-    }
-
-    static ExamQuestionView question(Question question) {
-        return new ExamQuestionView(
-                question.getId(),
-                question.getOrderIndex(),
-                question.getPrompt(),
-                question.getMaxWords());
+            Instant lastAnalysisAt,
+            long enrollmentCount,
+            long releasedCount,
+            long awaitingReleaseCount) {
     }
 
     static RuleView rule(ResourceRule rule) {
@@ -64,7 +60,7 @@ final class ExamMapper {
     static ExamDetail detail(
             Exam exam,
             Counts counts,
-            List<Question> questions,
+            List<StaffQuestionView> questions,
             List<ResourceRule> rules,
             List<ExamPermission> permissions) {
         return new ExamDetail(
@@ -75,14 +71,25 @@ final class ExamMapper {
                 exam.getStatus(),
                 exam.getDurationMinutes(),
                 exam.isAllowExtension(),
+                exam.getMaxStrikes(),
+                exam.getInstructions(),
+                exam.getOpensAt(),
+                exam.getClosesAt(),
                 exam.getCreatedAt(),
                 counts.attemptCount(),
                 counts.submittedCount(),
                 counts.findingCount(),
                 counts.openFindingCount(),
                 counts.lastAnalysisAt(),
-                questions.stream().map(ExamMapper::question).toList(),
+                counts.enrollmentCount(),
+                counts.releasedCount(),
+                counts.awaitingReleaseCount(),
+                questions,
                 rules.stream().map(ExamMapper::rule).toList(),
                 permissions.stream().map(ExamMapper::permission).toList());
+    }
+
+    static RosterEntryView rosterEntry(ExamEnrollment enrollment) {
+        return new RosterEntryView(enrollment.getId(), enrollment.getEmail(), enrollment.getCreatedAt());
     }
 }

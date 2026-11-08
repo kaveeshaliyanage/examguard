@@ -51,11 +51,25 @@ public class JwtService {
         return Jwts.builder()
                 .subject(String.valueOf(attempt.getId()))
                 .claim("role", "STUDENT")
+                .claim("scope", "ATTEMPT")
                 .claim("attemptId", attempt.getId())
                 .claim("examId", attempt.getExam().getId())
                 .claim("candidateCode", attempt.getCandidate().getCode())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(attemptTtlMinutes, ChronoUnit.MINUTES)))
+                .signWith(key)
+                .compact();
+    }
+
+    public String issueStudentToken(User user) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(String.valueOf(user.getId()))
+                .claim("role", "STUDENT")
+                .claim("scope", "ACCOUNT")
+                .claim("name", user.getDisplayName())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(staffTtlMinutes, ChronoUnit.MINUTES)))
                 .signWith(key)
                 .compact();
     }

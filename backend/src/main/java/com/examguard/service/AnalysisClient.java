@@ -1,6 +1,8 @@
 package com.examguard.service;
 
 import com.examguard.dto.AnalysisDtos.AnalysisResponse;
+import com.examguard.dto.AnalysisDtos.AuthorshipRequest;
+import com.examguard.dto.AnalysisDtos.AuthorshipResponse;
 import com.examguard.dto.AnalysisDtos.IncidentAnalysisRequest;
 import com.examguard.dto.AnalysisDtos.PairAnalysisRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,6 +63,15 @@ public class AnalysisClient {
                 .body(request)
                 .retrieve()
                 .body(AnalysisResponse.class);
+    }
+
+    public AuthorshipResponse analyzeAuthorship(AuthorshipRequest request) {
+        return client.post()
+                .uri("/analyze/authorship")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(AuthorshipResponse.class);
     }
 
     public record HealthResponse(String status) {

@@ -88,8 +88,13 @@ public class AnalysisPersistence {
         finding.setCandidateA(candidateA.get());
         finding.setCandidateB(candidateB.orElse(null));
         finding.setQuestionId(result.questionId());
-        finding.setPriorityScore(result.priorityScore());
-        finding.setPriorityBand(band(result.priorityBand(), result.priorityScore()));
+        double score = type == FindingType.CANDIDATE_AUTHORSHIP
+                ? AuthorshipPolicy.cap(result.priorityScore())
+                : result.priorityScore();
+        finding.setPriorityScore(score);
+        finding.setPriorityBand(type == FindingType.CANDIDATE_AUTHORSHIP
+                ? AuthorshipPolicy.band(score)
+                : band(result.priorityBand(), score));
         finding.setCoverageWarning(result.coverageWarning());
         finding.setStatus(FindingStatus.OPEN);
         finding.setSummary(result.summary());

@@ -8,6 +8,11 @@ import com.examguard.domain.Exam;
 import com.examguard.domain.Question;
 import com.examguard.domain.ResourceRule;
 import com.examguard.dto.AnalysisDtos.AnswerPayload;
+import com.examguard.dto.AnalysisDtos.AuthorshipAnswerPayload;
+import com.examguard.dto.AnalysisDtos.AuthorshipCandidatePayload;
+import com.examguard.dto.AnalysisDtos.AuthorshipConfig;
+import com.examguard.dto.AnalysisDtos.AuthorshipRequest;
+import com.examguard.dto.AnalysisDtos.AuthorshipRevisionPayload;
 import com.examguard.dto.AnalysisDtos.EventPayload;
 import com.examguard.dto.AnalysisDtos.IncidentAnalysisRequest;
 import com.examguard.dto.AnalysisDtos.IncidentCandidatePayload;
@@ -57,7 +62,10 @@ public class AnalysisPayloadBuilder {
         this.ruleRepository = ruleRepository;
     }
 
-    public record Payloads(PairAnalysisRequest pairs, IncidentAnalysisRequest incidents) {
+    public record Payloads(
+            PairAnalysisRequest pairs,
+            IncidentAnalysisRequest incidents,
+            AuthorshipRequest authorship) {
     }
 
     public Payloads build(Exam exam, String modelVersion) {
@@ -70,6 +78,7 @@ public class AnalysisPayloadBuilder {
 
         List<PairCandidatePayload> pairCandidates = new ArrayList<>();
         List<IncidentCandidatePayload> incidentCandidates = new ArrayList<>();
+        List<AuthorshipCandidatePayload> authorshipCandidates = new ArrayList<>();
         for (Attempt attempt : attempts) {
             Map<Long, List<RevisionPayload>> revisionsByQuestion = revisionsByQuestion(attempt.getId());
             List<AnswerPayload> answers = answerPayloads(questions, revisionsByQuestion);
@@ -84,6 +93,8 @@ public class AnalysisPayloadBuilder {
                     monitoringEnd(attempt),
                     exam.getDurationMinutes(),
                     attempt.isExtensionConnected()));
+            authorshipCandidates.add(new AuthorshipCandidatePayload(
+                    attempt.getCandidate().getCode(), attempt.getId(), authorshipAnswers(answers)));
         }
 
         PairAnalysisRequest pairRequest = new PairAnalysisRequest(
@@ -92,7 +103,21 @@ public class AnalysisPayloadBuilder {
         IncidentAnalysisRequest incidentRequest = new IncidentAnalysisRequest(
                 exam.getId(), modelVersion, incidentCandidates, rulePayloads(exam.getId()),
                 new IncidentConfig(120, 60.0, 500));
-        return new Payloads(pairRequest, incidentRequest);
+        AuthorshipRequest authorshipRequest = new AuthorshipRequest(
+                exam.getId(), modelVersion, authorshipCandidates, new AuthorshipConfig(200, 500));
+        return new Payloads(pairRequest, incidentRequest, authorshipRequest);
+    }
+
+    private List<AuthorshipAnswerPayload> authorshipAnswers(List<AnswerPayload> answers) {
+        return answers.stream()
+                .map(answer -> new AuthorshipAnswerPayload(
+                        answer.questionId(),
+                        answer.text(),
+                        answer.revisions().stream()
+                                .map(revision -> new AuthorshipRevisionPayload(
+                                        revision.revisionNo(), revision.text(), revision.savedAt()))
+                                .toList()))
+                .toList();
     }
 
     private Map<Long, List<RevisionPayload>> revisionsByQuestion(Long attemptId) {

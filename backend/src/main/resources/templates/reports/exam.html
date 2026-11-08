@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title th:text="'Exam report - ' + ${examTitle}">Exam report</title>
+    <style>
+        @page { size: A4; margin: 16mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Report; font-size: 10pt; color: #1f2430; line-height: 1.45; margin: 0; }
+        h1 { font-family: ReportBold; font-size: 19pt; margin: 4pt 0 2pt 0; }
+        h2 { font-family: ReportBold; font-size: 12pt; margin: 16pt 0 6pt 0; border-bottom: 0.6pt solid #d8dce5; padding-bottom: 3pt; }
+        .brand { font-family: ReportBold; font-size: 11pt; letter-spacing: 0.4pt; color: #2f5bd7; }
+        .muted { color: #6b7280; font-size: 8.5pt; }
+        .meta { display: flex; gap: 18pt; margin-top: 6pt; font-size: 8.5pt; color: #4b5563; }
+        .kpis { display: flex; gap: 8pt; margin-top: 12pt; }
+        .kpi { flex: 1; border: 0.8pt solid #d8dce5; border-radius: 6pt; padding: 9pt 11pt; background: #f7f9fc; }
+        .kpi .value { font-family: ReportBold; font-size: 18pt; }
+        .kpi .name { font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3pt; }
+        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        th, td { text-align: left; padding: 4pt 6pt; border-bottom: 0.5pt solid #e5e9f0; }
+        th { font-family: ReportBold; color: #4b5563; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; }
+        td.num, th.num { text-align: right; }
+        .bar-row { margin-bottom: 4pt; }
+        .bar-label { display: flex; justify-content: space-between; font-size: 8pt; color: #4b5563; }
+        .bar { height: 6pt; background: #e3e7ef; border-radius: 3pt; }
+        .bar > div { height: 6pt; background: #2f5bd7; border-radius: 3pt; }
+        .badge { display: inline-block; padding: 2pt 7pt; border-radius: 9pt; font-size: 7.5pt; font-family: ReportBold; }
+        .badge.low { background: #e6f4ea; color: #1e6b34; }
+        .badge.medium { background: #fdf0dc; color: #8a5200; }
+        .badge.high { background: #fde8e8; color: #9b1c1c; }
+        .badge.critical { background: #f5e0f7; color: #6b1c74; }
+        .caveat { font-size: 8pt; color: #8a5200; margin-top: 4pt; }
+        .empty { color: #9aa1ad; font-style: italic; }
+        footer { margin-top: 18pt; padding-top: 6pt; border-top: 0.5pt solid #e5e9f0; font-size: 7.5pt; color: #9aa1ad; }
+    </style>
+</head>
+<body>
+
+<div class="brand">EXAMGUARD</div>
+<div class="muted">Exam report</div>
+<h1 th:text="${examTitle}">Exam title</h1>
+<div class="meta">
+    <span th:text="'Exam code ' + ${examCode}">Code</span>
+    <span th:text="'Duration ' + ${durationMinutes} + ' minutes'">Duration</span>
+    <span th:text="'Questions ' + ${questionCount}">Questions</span>
+</div>
+
+<div class="kpis">
+    <div class="kpi">
+        <div class="name">Attempts</div>
+        <div class="value" th:text="${attempts}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Submitted</div>
+        <div class="value" th:text="${submitted}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Awaiting grading</div>
+        <div class="value" th:text="${ungraded}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Average score</div>
+        <div class="value" th:text="${averageText}">-</div>
+    </div>
+</div>
+
+<h2>Score distribution</h2>
+<div th:each="b : ${distribution}" class="bar-row">
+    <div class="bar-label">
+        <span th:text="${b.label}">0-20%</span>
+        <span th:text="${b.count} + ' attempts'">0 attempts</span>
+    </div>
+    <div class="bar"><div th:style="'width:' + ${b.percent} + '%'"></div></div>
+</div>
+<div class="muted" th:if="${distribution == null or distribution.isEmpty()}">No released results yet.</div>
+
+<h2>Question performance</h2>
+<table th:if="${perQuestion != null and !perQuestion.isEmpty()}">
+    <thead>
+    <tr>
+        <th>#</th>
+        <th>Question</th>
+        <th>Type</th>
+        <th class="num">Points</th>
+        <th class="num">Average</th>
+        <th class="num">Answered</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="q : ${perQuestion}">
+        <td th:text="${q.orderIndex}">1</td>
+        <td th:text="${q.prompt}">Prompt</td>
+        <td th:text="${q.typeLabel}">Essay</td>
+        <td class="num" th:text="${q.points}">5</td>
+        <td class="num" th:text="${q.averageText}">-</td>
+        <td class="num" th:text="${q.answeredCount}">0</td>
+    </tr>
+    </tbody>
+</table>
+
+<h2>Session integrity</h2>
+<div class="kpis">
+    <div class="kpi">
+        <div class="name">Focus losses</div>
+        <div class="value" th:text="${integrity.totalFocusLosses}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Terminated</div>
+        <div class="value" th:text="${integrity.terminatedAttempts}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Attempts with strikes</div>
+        <div class="value" th:text="${integrity.attemptsWithStrikes}">0</div>
+    </div>
+</div>
+
+<h2>Review signals</h2>
+<table th:if="${flagged != null and !flagged.isEmpty()}">
+    <thead>
+    <tr><th>Candidate</th><th>Signal</th><th>Band</th><th class="num">Score</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="f : ${flagged}">
+        <td th:text="${f.candidateCode}">C001</td>
+        <td th:text="${f.label}">Overlap</td>
+        <td><span class="badge" th:classappend="${f.cssClass}" th:text="${f.band}">MEDIUM</span></td>
+        <td class="num" th:text="${f.score}">42</td>
+    </tr>
+    </tbody>
+</table>
+<div class="muted" th:if="${flagged == null or flagged.isEmpty()}">No review signals above the reporting threshold.</div>
+<div class="caveat">Priority scores rank review attention only. They are not evidence of misconduct and must not be
+    used as an automatic penalty.</div>
+
+<footer th:text="'Generated ' + ${generatedAt} + ' - ExamGuard'">Generated</footer>
+
+</body>
+</html>

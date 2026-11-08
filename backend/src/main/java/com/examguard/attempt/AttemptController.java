@@ -5,6 +5,8 @@ import com.examguard.attempt.AttemptDtos.CoverageView;
 import com.examguard.attempt.AttemptDtos.EventBatchRequest;
 import com.examguard.attempt.AttemptDtos.EventBatchResponse;
 import com.examguard.attempt.AttemptDtos.HeartbeatRequest;
+import com.examguard.attempt.AttemptDtos.IntegritySignalRequest;
+import com.examguard.attempt.AttemptDtos.IntegritySignalResponse;
 import com.examguard.attempt.AttemptDtos.SaveAnswerRequest;
 import com.examguard.attempt.AttemptDtos.SaveAnswerResponse;
 import com.examguard.attempt.AttemptDtos.SubmitRequest;
@@ -25,10 +27,14 @@ public class AttemptController {
 
     private final AttemptService attemptService;
     private final IngestionService ingestionService;
+    private final IntegrityService integrityService;
 
-    public AttemptController(AttemptService attemptService, IngestionService ingestionService) {
+    public AttemptController(AttemptService attemptService,
+                             IngestionService ingestionService,
+                             IntegrityService integrityService) {
         this.attemptService = attemptService;
         this.ingestionService = ingestionService;
+        this.integrityService = integrityService;
     }
 
     @GetMapping
@@ -52,6 +58,14 @@ public class AttemptController {
             @RequestBody(required = false) SubmitRequest request) {
         return attemptService.submit(authentication, attemptId,
                 request == null ? new SubmitRequest(null) : request);
+    }
+
+    @PostMapping("/integrity/signals")
+    public IntegritySignalResponse signal(
+            Authentication authentication,
+            @PathVariable Long attemptId,
+            @Valid @RequestBody IntegritySignalRequest request) {
+        return integrityService.recordSignal(authentication, attemptId, request);
     }
 
     @PostMapping("/events")

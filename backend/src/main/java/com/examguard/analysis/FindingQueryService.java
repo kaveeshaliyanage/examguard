@@ -63,6 +63,7 @@ public class FindingQueryService {
         Finding finding = findFinding(findingId);
         accessService.requireExamView(auth, finding.getExam().getId());
         boolean isPair = finding.getType() == FindingType.CANDIDATE_PAIR;
+        boolean isAuthorship = finding.getType() == FindingType.CANDIDATE_AUTHORSHIP;
         return new FindingDetail(
                 finding.getId(),
                 finding.getType(),
@@ -77,9 +78,15 @@ public class FindingQueryService {
                 new ExamRef(finding.getExam().getId(), finding.getExam().getCode(), finding.getExam().getTitle()),
                 evidence(findingId),
                 decisions(findingId),
-                isPair ? contextBuilder.pairContext(finding.getExam(),
-                        finding.getCandidateA(), finding.getCandidateB()) : null,
-                isPair ? null : contextBuilder.incidentContext(finding.getExam(), finding.getCandidateA()));
+                isPair
+                        ? contextBuilder.pairContext(finding.getExam(),
+                                finding.getCandidateA(), finding.getCandidateB())
+                        : isAuthorship
+                                ? contextBuilder.pairContext(finding.getExam(), finding.getCandidateA(), null)
+                                : null,
+                isPair || isAuthorship
+                        ? null
+                        : contextBuilder.incidentContext(finding.getExam(), finding.getCandidateA()));
     }
 
     public Finding findFinding(Long findingId) {

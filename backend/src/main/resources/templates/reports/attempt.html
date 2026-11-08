@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title th:text="'Attempt report - ' + ${examTitle}">Attempt report</title>
+    <style>
+        @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Report; font-size: 10pt; color: #1f2430; line-height: 1.45; margin: 0; }
+        h1 { font-family: ReportBold; font-size: 19pt; margin: 4pt 0 2pt 0; }
+        h2 { font-family: ReportBold; font-size: 12pt; margin: 16pt 0 6pt 0; border-bottom: 0.6pt solid #d8dce5; padding-bottom: 3pt; }
+        .brand { font-family: ReportBold; font-size: 11pt; letter-spacing: 0.4pt; color: #2f5bd7; }
+        .muted { color: #6b7280; font-size: 8.5pt; }
+        .meta { display: flex; gap: 18pt; margin-top: 6pt; font-size: 8.5pt; color: #4b5563; }
+        .score-card { margin-top: 12pt; border: 0.8pt solid #d8dce5; border-radius: 6pt; padding: 12pt 14pt; background: #f7f9fc; }
+        .score-row { display: flex; justify-content: space-between; align-items: baseline; }
+        .score { font-family: ReportBold; font-size: 27pt; color: #1f2430; }
+        .score small { font-family: Report; font-size: 11pt; color: #6b7280; }
+        .bar { height: 7pt; background: #e3e7ef; border-radius: 4pt; margin-top: 8pt; }
+        .bar > div { height: 7pt; background: #2f5bd7; border-radius: 4pt; }
+        .badge { display: inline-block; padding: 2pt 7pt; border-radius: 9pt; font-size: 8pt; font-family: ReportBold; }
+        .badge.ok { background: #e6f4ea; color: #1e6b34; }
+        .badge.warn { background: #fdf0dc; color: #8a5200; }
+        .badge.bad { background: #fde8e8; color: #9b1c1c; }
+        .q { border: 0.6pt solid #e2e6ee; border-radius: 5pt; padding: 8pt 10pt; margin-bottom: 8pt; page-break-inside: avoid; }
+        .q-head { display: flex; justify-content: space-between; font-size: 8.5pt; color: #4b5563; }
+        .q-head .points { font-family: ReportBold; color: #1f2430; }
+        .prompt { font-family: ReportBold; margin: 3pt 0; }
+        .answer { background: #f7f9fc; border-left: 2pt solid #c7d2fe; padding: 5pt 7pt; margin: 4pt 0; white-space: pre-wrap; }
+        .empty { color: #9aa1ad; font-style: italic; }
+        .line { margin-top: 3pt; font-size: 9pt; }
+        .label { color: #6b7280; }
+        .comment { margin-top: 4pt; font-size: 9pt; background: #fff8e6; border-left: 2pt solid #f0c14b; padding: 4pt 6pt; }
+        .explanation { margin-top: 4pt; font-size: 9pt; color: #374151; }
+        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        th, td { text-align: left; padding: 4pt 6pt; border-bottom: 0.5pt solid #e5e9f0; }
+        th { font-family: ReportBold; color: #4b5563; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; }
+        .signal { border: 0.6pt solid #f0d9a8; background: #fffaf0; border-radius: 5pt; padding: 8pt 10pt; margin-bottom: 6pt; }
+        .caveat { font-size: 8pt; color: #8a5200; margin-top: 2pt; }
+        footer { margin-top: 18pt; padding-top: 6pt; border-top: 0.5pt solid #e5e9f0; font-size: 7.5pt; color: #9aa1ad; }
+    </style>
+</head>
+<body>
+
+<div class="brand">EXAMGUARD</div>
+<div class="muted">Individual attempt report</div>
+<h1 th:text="${examTitle}">Exam title</h1>
+<div class="meta">
+    <span th:text="'Candidate ' + ${candidateCode}">Candidate C001</span>
+    <span th:text="'Exam code ' + ${examCode}">Exam code</span>
+    <span th:text="'Status ' + ${status}">Status</span>
+    <span th:if="${submittedAt != null}" th:text="'Submitted ' + ${submittedAt}">Submitted</span>
+</div>
+
+<div class="score-card">
+    <div class="score-row">
+        <div>
+            <div class="score">
+                <span th:text="${scoreText}">0</span>
+                <small th:text="'/ ' + ${maxPoints} + ' points'">/ 0 points</small>
+            </div>
+            <div class="muted" th:text="${percentageText} + '% of the available marks'">0%</div>
+        </div>
+        <div>
+            <span class="badge" th:classappend="${released} ? 'ok' : 'warn'"
+                  th:text="${released} ? 'Results released' : 'Awaiting release'">Released</span>
+        </div>
+    </div>
+    <div class="bar"><div th:style="'width:' + ${percentage} + '%'"></div></div>
+</div>
+
+<h2>Question breakdown</h2>
+<div th:each="q : ${questions}" class="q">
+    <div class="q-head">
+        <span th:text="'Question ' + ${q.orderIndex} + ' - ' + ${q.typeLabel}">Question 1</span>
+        <span class="points" th:text="${q.awardedLabel} + ' / ' + ${q.points}">0 / 5</span>
+    </div>
+    <div class="prompt" th:text="${q.prompt}">Prompt</div>
+
+    <div class="answer" th:if="${q.answerText != null and !q.answerText.isEmpty()}"
+         th:text="${q.answerText}">Answer</div>
+    <div class="answer"
+         th:if="${(q.answerText == null or q.answerText.isEmpty()) and q.selectedOptions != null and !q.selectedOptions.isEmpty()}"
+         th:text="'Selected: ' + ${#strings.listJoin(q.selectedOptions, ', ')}">Selected: A, C</div>
+    <div class="answer empty"
+         th:if="${(q.answerText == null or q.answerText.isEmpty()) and (q.selectedOptions == null or q.selectedOptions.isEmpty())}">
+        No answer saved.
+    </div>
+
+    <div class="line" th:if="${released and q.correctKeys != null and !q.correctKeys.isEmpty()}">
+        <span class="label">Correct: </span>
+        <span th:text="${#strings.listJoin(q.correctKeys, ', ')}">B</span>
+    </div>
+
+    <div class="comment" th:if="${q.comment != null and !q.comment.isEmpty()}" th:text="${q.comment}">Comment</div>
+    <div class="explanation" th:if="${released and q.explanation != null and !q.explanation.isEmpty()}"
+         th:text="${q.explanation}">Explanation</div>
+</div>
+
+<h2>Session integrity</h2>
+<div class="line" th:text="'Focus losses recorded: ' + ${integrity.strikes} + ' of ' + ${integrity.maxStrikes} + ' allowed'">
+    Focus losses
+</div>
+<div class="line" th:if="${integrity.terminatedAt != null}"
+     th:text="'Attempt terminated at ' + ${integrity.terminatedAt}">Terminated</div>
+<table th:if="${integrity.events != null and !integrity.events.isEmpty()}">
+    <thead>
+    <tr><th>Signal</th><th>Time</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="e : ${integrity.events}">
+        <td th:text="${e.signalLabel}">Focus lost</td>
+        <td th:text="${e.occurredAt}">2026-01-01T10:00:00Z</td>
+    </tr>
+    </tbody>
+</table>
+<div class="muted" th:if="${integrity.events == null or integrity.events.isEmpty()}">
+    No focus-loss signals were recorded for this attempt.
+</div>
+
+<div th:if="${reviewSignals != null and !reviewSignals.isEmpty()}">
+    <h2>Review signals</h2>
+    <div class="signal" th:each="s : ${reviewSignals}">
+        <div>
+            <span class="badge" th:classappend="${s.cssClass}" th:text="${s.band}">MEDIUM</span>
+            <strong th:text="' ' + ${s.label}">Overlap signal</strong>
+            <span class="muted" th:text="'  score ' + ${s.score}">score 42</span>
+        </div>
+        <div class="line" th:if="${s.detail != null and !s.detail.isEmpty()}" th:text="${s.detail}">Detail</div>
+        <div class="caveat">Review aid only. This signal is not proof of misconduct and does not affect the score.</div>
+    </div>
+</div>
+
+<footer>
+    <span th:text="'Generated ' + ${generatedAt} + ' - ExamGuard'">Generated</span>
+    <span th:if="${!released}"> - Preliminary: results have not been released.</span>
+</footer>
+
+</body>
+</html>

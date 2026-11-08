@@ -22,6 +22,8 @@ import java.util.List;
 @Component
 class DemoExamSeeder {
 
+    static final String EXAM_CODE = "DEMO-101";
+
     private static final int QUESTION_MAX_WORDS = 250;
 
     private final ExamRepository examRepository;
@@ -45,7 +47,7 @@ class DemoExamSeeder {
 
     SeededExam seed(User lecturer, User reviewer) {
         Exam exam = new Exam();
-        exam.setCode("DEMO-101");
+        exam.setCode(EXAM_CODE);
         exam.setTitle("Demo Examination: Systems and Integrity");
         exam.setDescription("""
                 A four-question short-answer demonstration exam. The seeded attempts contain scripted
