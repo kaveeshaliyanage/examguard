@@ -32,7 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ReportApiTest extends ApiTestBase {
 
-    private record Fixture(Exam exam, Question question, Attempt attempt, String candidateCode) {
+    private record Fixture(Exam exam, Question question, Attempt attempt, Candidate candidate,
+                           String candidateCode) {
     }
 
     private Fixture gradedAttempt() {
@@ -61,7 +62,7 @@ class ReportApiTest extends ApiTestBase {
         attempt.setMaxPoints(new BigDecimal("5.00"));
         attempt.setGradedAt(Instant.now());
         attempt = attemptRepository.save(attempt);
-        return new Fixture(exam, question, attempt, candidateCode);
+        return new Fixture(exam, question, attempt, candidate, candidateCode);
     }
 
     @Test
@@ -91,6 +92,24 @@ class ReportApiTest extends ApiTestBase {
                 .andExpect(jsonPath("$.scorePoints").value(5.00))
                 .andExpect(jsonPath("$.questions[0].correctKeys[0]").value("B"))
                 .andExpect(jsonPath("$.questions[0].explanation").value("TCP is connection oriented."));
+    }
+
+    @Test
+    void reviewSignalsAreVisibleToStaffButNotStudents() throws Exception {
+        Fixture fixture = gradedAttempt();
+        finding(fixture.exam(), fixture.candidate(), null, 51.0);
+        release(fixture);
+
+        mvc.perform(get("/api/reports/attempts/" + fixture.attempt().getId())
+                        .header(HttpHeaders.AUTHORIZATION, attemptToken(fixture)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewSignals").isEmpty());
+
+        mvc.perform(get("/api/reports/attempts/" + fixture.attempt().getId())
+                        .header(HttpHeaders.AUTHORIZATION, bearer(fixture.exam().getCreatedBy())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewSignals[0].band").value("MEDIUM"))
+                .andExpect(jsonPath("$.reviewSignals[0].label").value("Activity incident"));
     }
 
     @Test
