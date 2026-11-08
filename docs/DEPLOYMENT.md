@@ -93,6 +93,85 @@ Deploying without the artifacts while `USE_LEARNED_FUSION=true` falls back to ru
 (`_load_model` returns `None`), which is safe but easy to miss. Check the `fusionMode` stat in an
 analysis response after switching.
 
+The authorship classifier uses the same switch: `USE_LEARNED_FUSION=true` plus
+`models/authorship.joblib` and `authorship.meta.json` loads the calibrated estimator; otherwise the
+transparent rule weights score stylometry. Either path caps the score at 54, so deployment cannot
+change the MEDIUM band ceiling. `/health` reports `authorshipAvailable` and `authorshipScoreCap`.
+
+## Cloud deployment: Render + Supabase + Vercel
+
+The managed path runs the same two containers as the VPS path:
+
+```
+Vercel (SPA) --HTTPS--> Render examguard-api --HTTPS--> Render examguard-ai
+                              |
+                              +--> Supabase PostgreSQL 16
+```
+
+Only the API and the AI service are public. The SPA never talks to the AI service directly.
+
+### 1. Supabase (PostgreSQL 16)
+
+1. Create a project. Settings > Database shows two connection strings.
+2. Use the **direct** connection (`db.<ref>.supabase.co:5432`) for the API. A single long-lived
+   Render instance holds few connections, and Flyway needs a session-capable connection on the
+   first boot. Use the transaction pooler (`<region>.pooler.supabase.com:6543`,
+   `?prepareThreshold=0`) only if you scale to several API instances.
+3. Give the API a dedicated role rather than `postgres`; it needs DDL rights on the first deploy
+   because Flyway creates the schema.
+
+```
+DB_VENDOR=postgresql
+SPRING_DATASOURCE_URL=jdbc:postgresql://db.<ref>.supabase.co:5432/postgres?sslmode=require
+SPRING_DATASOURCE_USERNAME=examguard
+SPRING_DATASOURCE_PASSWORD=<password>
+```
+
+Flyway picks `classpath:db/migration/postgresql` from `DB_VENDOR` and validates the result against
+the entity mappings (`ddl-auto: validate`). A mismatch fails startup rather than drifting silently.
+
+### 2. Render
+
+`render.yaml` at the repository root declares both services. Create a Blueprint and point it at the
+repository, then fill the secrets marked `sync: false` in the dashboard.
+
+| Service | Health check | Notes |
+| --- | --- | --- |
+| `examguard-api` | `/actuator/health` | Java image, `SEED_DEMO_DATA=false`, generated `JWT_SECRET` |
+| `examguard-ai` | `/health` | Python image, models not shipped by default |
+
+Set `ANALYSIS_BASE_URL` to the AI service's public URL and `CORS_ALLOWED_ORIGINS` to the Vercel
+production domain. Do not use a wildcard: the SPA is the only browser client.
+
+Starter and free instances spin down when idle; the first request afterwards takes 30–60 seconds.
+Add an uptime ping on `/health` if the AI service must stay warm during an exam window, or move to a
+paid plan for exam days.
+
+Learned fusion stays off (`USE_LEARNED_FUSION=false`) until the artifacts are copied into `ai/models`.
+The deployment then uses rule weights and the response reports the rule fusion mode.
+
+### 3. Vercel
+
+Import the repository, set the root directory to `frontend`, and keep the Vite preset. `vercel.json`
+rewrites every path to `index.html` so client-side routes survive a refresh.
+
+| Variable | Value |
+| --- | --- |
+| `VITE_API_BASE_URL` | `https://examguard-api.onrender.com` |
+| `VITE_DEFAULT_EXAM_CODE` | optional, join-page default |
+
+The browser calls the API cross-origin in this topology, so the API's `CORS_ALLOWED_ORIGINS` must
+contain the exact Vercel origin (preview deployments included, if you use them).
+
+### 4. Cloud smoke test
+
+```bash
+curl -fsS https://examguard-api.onrender.com/actuator/health
+curl -fsS https://examguard-ai.onrender.com/health
+curl -fsS https://<app>.vercel.app/ > /dev/null
+# then sign in through the browser and confirm /api/exams returns for a lecturer
+```
+
 ## Backup
 
 ```bash

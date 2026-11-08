@@ -25,6 +25,8 @@ Scores are review priority 0-100, bands `LOW | MEDIUM | HIGH | CRITICAL`.
 { "token": "<jwt>", "user": { "id": 2, "email": "lecturer@examguard.local",
   "displayName": "Demo Lecturer", "role": "LECTURER" } }
 ```
+Staff only (`ADMIN`, `LECTURER`, `REVIEWER`). A student account is refused with 401
+`Students sign in at the student portal`; students use `POST /student/auth/login`.
 
 ### `GET /auth/me`
 Returns the same `user` object.
@@ -49,7 +51,17 @@ Returns the same `user` object.
   "answers": [ { "questionId": 1, "text": "...", "revisionNo": 3, "savedAt": "..." } ]
 }
 ```
-Returns `409` if the attempt is already submitted.
+
+Join rules:
+
+- `409` if the attempt is already submitted.
+- `409` when starting a **new** attempt outside the schedule (`opensAt` future → "This exam opens at …",
+  `closesAt` past → "This exam closed at …"). An attempt already `IN_PROGRESS` always resumes, even
+  after `closesAt`, so saved answers are never stranded.
+- When the exam has a non-empty roster, `403` unless the signed-in account's email is enrolled
+  (case-insensitive). Guests (no account token) are refused with `403` and pointed at sign-in.
+  Exams without a roster keep open join by code, and enrolment is only checked when a new attempt is
+  created.
 
 ## Candidate (attempt token)
 
@@ -115,6 +127,10 @@ Duplicates are detected by `(attemptId, clientEventId)`. Events outside the atte
   "description": "Short answers",
   "durationMinutes": 90,
   "allowExtension": true,
+  "maxStrikes": 3,
+  "instructions": "Close other applications.",
+  "opensAt": "2026-11-12T09:00:00Z",
+  "closesAt": "2026-11-12T11:00:00Z",
   "questions": [ { "prompt": "Explain ...", "maxWords": 250 } ],
   "resourceRules": [
     { "category": "PERMITTED", "domainPattern": "*.edu", "note": "University resources" },
@@ -123,10 +139,51 @@ Duplicates are detected by `(attemptId, clientEventId)`. Events outside the atte
 }
 ```
 Creates the exam in `DRAFT`, creates questions/rules and an `OWNER` permission for the creator.
-Returns the exam detail.
+`opensAt` and `closesAt` are optional; when both are present `opensAt` must be before `closesAt`.
+`maxStrikes` defaults to 3 (range 1–10). Returns the exam detail.
 
 ### `GET /exams/{id}`
-Detail: summary fields plus description, allowExtension, questions, resourceRules, permissions.
+Detail: summary fields plus `description`, `allowExtension`, `maxStrikes`, `instructions`, `opensAt`,
+`closesAt`, questions, resourceRules and permissions. Also carries the counts
+`attemptCount`, `submittedCount`, `findingCount`, `openFindingCount`, `enrollmentCount`,
+`releasedCount` and `awaitingReleaseCount`.
+
+### `PATCH /exams/{id}`
+Full replacement of the editable settings. Exam **owner only**; writes audit action
+`EXAM_SETTINGS_UPDATED` with the changed field names.
+```json
+{
+  "title": "Midterm",
+  "description": "Short answers",
+  "durationMinutes": 75,
+  "allowExtension": false,
+  "maxStrikes": 2,
+  "instructions": "Close other applications.",
+  "opensAt": null,
+  "closesAt": null,
+  "resourceRules": [ { "category": "PROHIBITED", "domainPattern": "chegg.com", "note": "Cheating site" } ]
+}
+```
+`durationMinutes` is 5–600, `maxStrikes` 1–10, and a present pair must satisfy `opensAt < closesAt`
+(otherwise `400`). `resourceRules` replaces the whole set. The **code is immutable** — it is the join
+key. Editing stays allowed after candidates join; duration is evaluated when an attempt is submitted,
+so it affects lateness, not already-started timers.
+
+### `GET /exams/{id}/roster`
+```json
+[ { "id": 7, "email": "c001@students.example", "createdAt": "..." } ]
+```
+Owner, reviewer, viewer or admin. A non-empty roster restricts new joins to enrolled emails.
+
+### `POST /exams/{id}/roster`
+```json
+{ "email": "c001@students.example" }
+```
+`201` with the entry. Emails are trimmed, lower-cased and unique per exam (`409` on duplicates);
+invalid addresses are `400`. Owner only.
+
+### `DELETE /exams/{id}/roster/{entryId}`
+`204`. Owner only. Removing the last entry re-opens join by exam code alone.
 
 ### `PATCH /exams/{id}/status`
 ```json
@@ -207,6 +264,39 @@ Target an existing staff user by id or email:
 { "email": "reviewer@examguard.local", "level": "VIEWER" }
 ```
 Admin or exam owner only. `DELETE /exams/{id}/permissions/{userId}` revokes.
+
+## Dashboards (staff and students)
+
+`GET /api/dashboard/student` (account token, `role=STUDENT`), `GET /api/dashboard/lecturer` and
+`GET /api/dashboard/admin` (staff token).
+
+### Student dashboard
+```json
+{ "profile": { ... }, "stats": { "totalAttempts": 3, "submitted": 2,
+  "terminated": 0, "released": 1, "averagePercentage": 71.5, "strikesThisTerm": 1 },
+  "upcoming": [
+    { "examId": 9, "code": "NET-101", "title": "Networking Midterm",
+      "opensAt": "2026-11-12T09:00:00Z", "closesAt": "2026-11-12T10:00:00Z",
+      "openNow": false }
+  ],
+  "attempts": [ { ... } ] }
+```
+`upcoming` lists exams the signed-in student is **enrolled in**, that are `OPEN`, and that have no
+attempt yet. `openNow` is computed from the schedule; the UI shows "Opens …" otherwise. Joined and
+in-progress attempts appear in `attempts`, never twice.
+
+### Lecturer dashboard
+Existing fields plus:
+```json
+{ "distribution": [ { "label": "0-19", "count": 2 } ],
+  "integrityTrend": [ { "date": "2026-10-26", "focusLossSignals": 0 } ],
+  "bandMix": [ { "band": "HIGH", "count": 1 } ],
+  "funnel": [ { "stage": "Attempts", "count": 12 }, { "stage": "Submitted", "count": 9 },
+              { "stage": "Graded", "count": 6 }, { "stage": "Released", "count": 3 } ] }
+```
+`integrityTrend` covers the last 14 UTC days, zero-filled, counting `FOCUS_LOSS` signals for accessible
+exams. `bandMix` aggregates the active (`OPEN`/`NEEDS_INFO`/`ESCALATED`) findings. `funnel` is derived
+from submitted attempts (`gradedAt`, `releasedAt`).
 
 ## Admin
 

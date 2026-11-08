@@ -121,3 +121,98 @@ PAN-PC, SemEval-2013 Task 7, OULAD, consented pilot).
 `kaggle/README.md` documents publishing the rows, the artifacts and the training notebook with the
 official CLI. The notebook runs offline: the dataset ships `code.tar.gz` (a snapshot of `ai/app`)
 because the CLI skips nested directories, so the notebook extracts it before training.
+
+## AI-authorship signal (review aid)
+
+The authorship model flags prose that looks **machine-generated**. It is a review aid: it is not
+proof that AI was used, it is not misconduct evidence, and it says nothing about copying. Copying
+remains the pair-similarity model's job. Because the signal is weak and easy to misinterpret, the
+runtime caps it: `AUTHORSHIP_SCORE_CAP = 54`, so the only reachable bands are LOW (< 30) and
+MEDIUM (30-54). HIGH and CRITICAL are unreachable by construction, even if a learned model
+returns 0.99; tests stub the model to assert this.
+
+### Data
+
+`app/training/authorship_cohorts.py` generates one candidate per request with four answers from a
+seeded RNG. Human-like answers vary sentence and paragraph length, use contractions, dashes,
+parentheses and semicolons, and arrive through three growing revisions. Machine-like answers keep
+sentence length even, avoid contractions, use formal connectives and repeated bigrams, balance
+paragraphs, and appear almost fully formed in one revision. Labels describe the simulator. About
+5% of answers are deliberately short and are skipped exactly as inference skips them.
+
+External corpora use `app/training/authorship_corpora.py`:
+
+```bash
+python -m app.training.authorship_corpora --input authorship-external.jsonl \
+    --out data-authorship-external --check-split
+```
+
+Input is JSONL with `text`, `label`, `authorId`, `source`, `license`. Rows without a licence,
+without an author id, with a licence outside the allowlist (`CC0`, `CC-BY`, `CC-BY-SA`, `MIT`,
+`Apache-2.0`, `research-use`, `consented-pilot`) or under 200 characters are rejected. Splits are
+grouped by author, never by row, so one author cannot straddle train and test. Candidate sources
+and their licence caveats are documented in the module docstring: HC3, DAIGT v2, RAID, M4,
+Persuade 2.0 and ELLIPSE. Nothing is downloaded; licence compliance is the operator's
+responsibility. Only `consented-pilot` rows can support a production claim.
+
+### Features
+
+`app/authorship/features.py` exports `AUTHORSHIP_FEATURE_ORDER` and builds a deterministic vector
+with no network access: sentence-length mean/variance/burstiness, type-token ratio, hapax ratio,
+comma/semicolon/dash/parenthesis rates, contraction rate, average word length, repeated-bigram
+rate, paragraph-length variance, ten function-word frequencies, and revision dynamics (revision
+count, mean words added per revision, final/first word ratio). Empty or short text yields zeros,
+never a division by zero. `authorship.meta.json` stores the order; the runtime refuses a model
+whose order does not match and falls back to rules, mirroring the fusion loader's version-skew
+warning.
+
+### Scoring and gates
+
+The rules baseline combines nine documented signals; the weight table lives in
+`app/authorship/classifier.py` and in `models/authorship.MODEL_CARD.md`:
+
+| Signal | Weight |
+| --- | --- |
+| sentenceRhythm | 0.18 |
+| sentenceVariability | 0.10 |
+| contractionAvoidance | 0.14 |
+| paragraphUniformity | 0.10 |
+| functionWordRegularity | 0.14 |
+| formulaicRepetition | 0.10 |
+| punctuationFlatness | 0.10 |
+| revisionFlatness | 0.08 |
+| formalWordLength | 0.06 |
+
+The weighted score passes through a logistic link (center 0.68, gain 6.0), and the probability
+becomes the 0-100 priority, clamped to 54. With `USE_LEARNED_FUSION=true` and
+`models/authorship.joblib` present, the calibrated estimator replaces the rules probability; the
+cap, band ceiling and feature-order check still apply. Answers under `minAnswerChars` (default
+200) are skipped and at most `maxFindings` (default 200) findings are emitted.
+
+```bash
+cd ai
+python -m app.training.authorship_export --out data-authorship --cohorts 200 --seed 7
+python -m app.training.authorship_train  --data data-authorship --out models --seed 7
+python -m app.training.authorship_eval   --data data-authorship/authorship.jsonl \
+    --model models/authorship.joblib
+```
+
+Outputs:
+
+```
+data-authorship/authorship.jsonl        exported stylometry rows
+data-authorship/manifest.json           seed, counts, class balance, SHA-256, manifest hash
+models/authorship.joblib
+models/authorship.meta.json             feature order, splits, metrics, threshold, library versions
+models/authorship.MODEL_CARD.md
+```
+
+`authorship_eval.py` reports AUROC, TPR at 5% FPR and expected calibration error, and exits
+non-zero below AUROC 0.80, TPR 0.55 or above ECE 0.05 so CI can gate on it. Point it at
+`--model models/authorship.joblib`; the rules baseline is a ranking heuristic and is not
+calibrated, so it can pass AUROC and TPR while failing ECE. The published local run (200
+cohorts, seed 7) reaches AUROC 1.0, TPR@5%FPR 1.0 and ECE 0.012 on held-out authors.
+Those numbers are **synthetic**: the labels and features come from the same simulator, so they
+show the pipeline is wired correctly, not that the detector generalises. The model card states
+this, repeats the cap and warns that machine-like prose can be written by a careful human or a
+non-native speaker. Do not present an authorship score as proof of AI use.

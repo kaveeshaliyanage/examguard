@@ -3,34 +3,40 @@
 [![CI](https://github.com/kaveeshaliyanage/examguard/actions/workflows/ci.yml/badge.svg)](https://github.com/kaveeshaliyanage/examguard/actions/workflows/ci.yml)
 [![CD](https://github.com/kaveeshaliyanage/examguard/actions/workflows/cd.yml/badge.svg)](https://github.com/kaveeshaliyanage/examguard/actions/workflows/cd.yml)
 
-Multi-evidence review of online examination submissions. Students take a short-answer exam in the
+Multi-evidence review of online examination submissions. Students take a typed exam in the
 platform; permitted browser activity is observed by an optional Chrome extension; after submission a
-Python analysis service produces two **separate** kinds of review findings:
+Python analysis service produces three **separate** kinds of review findings:
 
 | Output | Purpose |
 | --- | --- |
 | Candidate incident | One candidate's observed resource use, coverage gaps and nearby answer changes. |
 | Candidate pair | Similarity, distinctive shared patterns and timing relationships between two candidates. |
+| Candidate authorship | Stylometric signals in one candidate's prose (review aid, capped at MEDIUM priority). |
 
 A website visit by one candidate never contributes to a pair finding. The isolation is structural:
 the backend sends pair analysis a payload that cannot contain activity events, and sends incident
-analysis a separate payload. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+and authorship analysis separate single-candidate payloads. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 `priorityScore` (0-100) is **review priority**, not a probability of misconduct. Nothing in this
 system decides that a student cheated. Lecturers review the evidence and record a decision with a
 rationale. Coverage warnings are shown wherever evidence is incomplete: missing observations are
 unknown, not clean.
 
+The authorship score is capped at **54**, so stylometry alone can never reach HIGH or CRITICAL. It
+describes how an answer was written; it is not proof that AI was used, and copying remains the pair
+model's job.
+
 ## What is in the repository
 
 | Part | Stack | Status |
 | --- | --- | --- |
-| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL | Complete: auth, exams, permissions, attempts, autosave, events, heartbeat, analysis orchestration, findings, decisions, audit |
-| `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, isolated payloads |
-| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query | Complete: staff dashboard, findings review, decisions, audit, student exam flow, autosave, countdown |
+| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL/PostgreSQL | Complete: auth with student accounts, typed exams and authoring, attempts and the 3-strike integrity policy, auto + manual grading with a release gate, reports and PDF export, dashboards, analysis orchestration, findings, decisions, audit |
+| `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, authorship stylometry (capped at 54), isolated payloads |
+| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query/Table, recharts | Complete: staff and admin dashboards, exam authoring, grading queue, findings review, decisions, audit, student dashboard, typed question renderer, integrity dialog, reports |
 | `extension/` | Chrome MV3, TypeScript | Complete: domain-only observation, persistent queue, batching, backoff, reconnect flow |
-| `ai/app/training/` | scikit-learn, joblib | Complete: synthetic cohort generator, feature export, calibrated pair/incident training, model card, external-corpus adapter |
-| `.github/workflows/` | GitHub Actions | Complete: four test jobs, compose smoke test, GHCR image publishing on tags, optional VPS deploy |
+| `ai/app/training/` | scikit-learn, joblib | Complete: synthetic cohort generators, feature export, calibrated pair/incident/authorship training, model cards, external-corpus adapter |
+| `.github/workflows/` | GitHub Actions | Complete: test jobs (backend, PostgreSQL, AI, AI evaluation gates, frontend bundle budget, extension), compose smoke with Playwright, GHCR image publishing on tags, optional VPS deploy |
 | `kaggle/` | Kaggle CLI | Complete: private dataset, offline training notebook, model storage |
 
 Tests: 36 backend, 40 AI, 22 frontend, 13 extension. The AI suite includes a 100-candidate timing
@@ -60,18 +66,28 @@ Demo accounts created on first start:
 | Administrator | admin@examguard.local | Admin123! |
 | Lecturer | lecturer@examguard.local | Lecturer123! |
 | Reviewer | reviewer@examguard.local | Reviewer123! |
+| Student | student@examguard.local | Student123! |
 
-The seeded exam is `DEMO-101` with candidate codes `C001` ... `C008`.
+Two demo exams are seeded:
+
+| Exam | Content |
+| --- | --- |
+| `DEMO-101` | Candidate codes `C001` ... `C008` for pair and incident review. |
+| `DEMO-102` | Five typed questions (one of each type), two scripted candidates and a released result for `C101`. |
 
 ## Demo flow
 
 1. Sign in as lecturer at `/login`, open `DEMO-101`, click **Run analysis**.
 2. **Pairs** tab: `C001`/`C002` share a rare phrase and have aligned answer changes.
 3. **Incidents** tab: `C004` visited a prohibited domain shortly before an answer change.
-4. Open a finding, inspect evidence and answer revisions, record a decision and a rationale
+4. **Authorship** tab: stylometric review flags, capped at MEDIUM.
+5. Open a finding, inspect evidence and answer revisions, record a decision and a rationale
    (at least 10 characters). Every decision is audited.
-5. Student side: `/join` with `DEMO-101` and candidate code `C009`, answer, submit, then run
-   analysis again.
+6. Open `DEMO-102` → **Grading** to mark the essay, then **Release results**. Sign in as
+   `student@examguard.local` to see the released score and download the PDF report.
+7. Student side: `/join` with `DEMO-101` and a fresh candidate code such as `C009`, answer,
+   submit, then run analysis again. Leaving the tab is recorded; the third focus loss ends the
+   attempt.
 
 The extension is optional. Load `extension/dist` as an unpacked extension, connect it with the
 attempt's collector token shown on the student page, and only domains and event times are sent.

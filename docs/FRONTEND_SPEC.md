@@ -18,21 +18,28 @@ extension contribute **domain-only** observations. It must never imply that a sc
    activity evidence inside a pair view.
 4. A finding is not a verdict. The decision dialog must say that a human decision is required and
    must require a rationale.
-5. Never display candidate emails, tokens or raw URLs. Candidate codes only; domains only.
+5. Never display candidate emails, tokens or raw URLs inside findings and candidate-facing screens.
+   Candidate codes only; domains only. The one exception is the staff-only exam roster, where the
+   lecturer manages the enrolled addresses.
 
 ## 2. Routes
 
 | Route | Audience | Purpose |
 | --- | --- | --- |
 | `/login` | Staff | Email/password sign-in |
+| `/dashboard` | Lecturer/admin | Lecturer dashboard: exam health, charts, grading queue |
+| `/admin` | Admin | Users, runs, audit, AI health |
 | `/exams` | Staff | Exam list with status, attempts, open findings |
-| `/exams/new` | Lecturer | Create exam, questions, resource rules |
-| `/exams/:id` | Staff | Overview, attempts, runs, findings, permissions |
+| `/exams/new` | Lecturer | Create exam, questions, resource rules, schedule |
+| `/exams/:id` | Staff | Overview, attempts, runs, findings, grading, settings |
 | `/exams/:id/audit` | Staff | Audit trail |
 | `/findings/:id` | Reviewer | Evidence detail and decision |
 | `/join` | Student | Enter exam code + candidate code |
+| `/student` | Student account | Signed-in student dashboard: stats, upcoming exams, attempts |
 | `/attempt/:attemptId` | Student | Answer questions, autosave, timer, submit |
+| `/attempt/:attemptId/instructions` | Student | Pre-exam instructions and extension setup |
 | `/attempt/:attemptId/submitted` | Student | Receipt and safe close |
+| `/attempt/:attemptId/report` | Student account | Report (403 until released) |
 
 Unknown routes redirect to `/exams` when signed in, otherwise `/login`. Staff routes require a staff
 token; student routes require an attempt token whose `attemptId` matches the URL. On 401, clear the
@@ -60,14 +67,26 @@ analysis. Sort by created date descending. Actions: open, create exam (lecturer/
 Status chips: DRAFT neutral, OPEN success, CLOSED warning, ANALYSED info. Finding count links to the
 findings tab with `status=OPEN`.
 
+Tables use the shared `DataTable` (TanStack Table: sorting, global filter, column visibility,
+pagination, sticky header, loading/empty states). Sort, filter, page and page size live in the URL via
+`lib/tableState.ts` (`readTableState` / `writeTableState` / `useTableUrlState`), using a per-table key
+prefix (`sort`/`q`, `fsort`/`fq`, `asort`/`aq`) so several tables can coexist on one page. Only
+allow-listed sort columns are honoured; defaults are removed from the URL.
+
 ### 4.2 Create exam `/exams/new`
 
-Form fields: code, title, description, durationMinutes, allowExtension, questions (prompt, maxWords,
-add/remove/reorder), resource rules (category, domainPattern, note, add/remove).
+Form fields: code, title, description, durationMinutes, allowExtension, maxStrikes, instructions,
+opensAt, closesAt, questions and resource rules.
 
-Client validation: code required/unique-looking, duration 5–480, at least one question, no empty
-prompt. Show a preview of how a domain rule matches: exact, `*.suffix`, or `re:`. Do not validate the
-regex server-side only; catch invalid `re:` patterns in the form.
+Questions are typed (`SINGLE_CHOICE`, `MULTI_CHOICE`, `TRUE_FALSE`, `SHORT_ANSWER`, `ESSAY`, `AUTO` or
+`MANUAL` grading, points, answer keys, explanation). The question dialog has an **Edit / Preview**
+toggle: Preview renders the draft through the same `QuestionRenderer` students use (interactive but
+never saved), so authors see the real layout, options and input type before saving.
+
+Client validation: code required/unique-looking, duration 5–600, maxStrikes 1–10, at least one
+question, no empty prompt, and `closesAt` after `opensAt` when both are set. Show a preview of how a
+domain rule matches: exact, `*.suffix`, or `re:`. Do not validate the regex server-side only; catch
+invalid `re:` patterns in the form.
 
 Submit `POST /api/exams`; on success go to `/exams/:id` with a toast. Creating an exam never opens it
 automatically.
@@ -77,21 +96,50 @@ automatically.
 Header: title, code, status, duration, permission badge, actions (open/close, run analysis).
 Tabs:
 
-1. **Overview** — description, questions, rules, extension allowance, latest run summary.
-2. **Attempts** — `GET /exams/:id/attempts`; candidate code, status, submitted time, answer count,
-   event count, coverage percent, coverage warning, late flag. Coverage < 60% shows a warning chip,
-   not a red "cheating" chip.
+1. **Overview** — description, schedule (`opensAt`/`closesAt`, enrollment count), questions, rules,
+   extension allowance, latest run summary. Copy notes that the schedule blocks **new joins only**;
+   attempts already in progress can resume.
+2. **Attempts** — `GET /exams/:id/attempts` via `DataTable` with URL-synced sorting/filter/page;
+   candidate code, status, started/submitted time, answer count, event count, coverage percent,
+   coverage warning, late flag. Coverage < 60% shows a warning chip, not a red "cheating" chip.
 3. **Findings** — `GET /exams/:id/findings`; filter by type and status. Two sub-tabs: **Pairs** and
    **Incidents**. Both sorted by priority descending. Row: band chip, score, candidates, summary,
    coverage icon, evidence count, status. Click opens `/findings/:id`.
 4. **Runs** — `GET /exams/:id/analysis-runs`; status, model version, findings created, timings,
    error. "Run analysis" is disabled while an exam has no submitted attempts or a run is in flight.
-5. **Settings** — status transitions, permissions (owner/admin), audit link.
+5. **Grading** — split view: candidate list, answer, score input, save and progress. Keyboard
+   navigation moves between candidates (`ArrowUp`/`ArrowLeft`/`j` previous, `ArrowDown`/`ArrowRight`/
+   `k` next, ignored while focus is in an input, textarea, select or contenteditable) with Previous /
+   Next buttons and a "Candidate N of M" label. Results stay behind the release gate.
+6. **Settings** — fully editable settings form (title, description, duration, allowExtension,
+   maxStrikes, instructions, schedule, resource rules), an **UnsavedChangesGuard** while dirty, and a
+   **Results** card showing `releasedCount`/`awaitingReleaseCount` with a link to grading. Also:
+   status transitions, permissions (owner/admin), roster management and the audit link.
 
 Run analysis: `POST /exams/:id/analysis-runs`. Show a blocking progress panel because the endpoint is
 synchronous; on failure show the returned run error and keep previous findings visible.
 
-### 4.4 Finding detail `/findings/:id`
+The code is immutable; everything else on the Settings tab is editable after candidates join. The
+form says duration applies at submit time (lateness), not to timers already running.
+
+**Roster** — a non-empty roster restricts new joins to enrolled emails. The Settings tab lists
+enrolled emails with add (`POST /exams/{id}/roster`) and remove (`DELETE …/{entryId}`), shows the
+count, and states that an empty roster allows join by exam code alone. Emails are shown to staff only;
+candidate-facing screens keep using candidate codes.
+
+### 4.4 Dashboard `/dashboard` (lecturer)
+
+Above "Exam health", a responsive three-up grid of `ChartCard`s:
+
+- **Integrity trend** — `AreaChart` of `focusLossSignals` over the last 14 UTC days; the aria-label is
+  "Focus-loss signals per day over the last 14 days"; focus loss is a recorded signal, not enforcement.
+- **Band mix** — `PieChart` of active findings by `LOW→CRITICAL` using the design-token band colours.
+- **Attempt funnel** — horizontal `BarChart` of Attempts → Submitted → Graded → Released.
+
+Each chart has an explicit empty state rather than an empty plot. The score distribution histogram
+sits below with the exam health table, grading queue and flagged candidates.
+
+### 4.5 Finding detail `/findings/:id`
 
 Two-column layout on desktop, stacked on mobile:
 
@@ -118,20 +166,33 @@ History shows reviewer name, outcome, rationale and time. Do not hide previous d
 Band colors: LOW secondary/neutral, MEDIUM warning, HIGH error, CRITICAL deep error with a distinct
 icon. Never color an entire page red; keep the evidence readable.
 
-### 4.5 Audit `/exams/:id/audit`
+### 4.6 Audit `/exams/:id/audit`
 
 `GET /exams/:id/audit`; table with actor, action, entity, time and expandable JSON detail. Read-only.
+Settings edits appear as `EXAM_SETTINGS_UPDATED` with the changed field names.
 
 ## 5. Student flow
 
-### 5.1 Join `/join`
+### 5.1 Signed-in dashboard `/student`
 
-Fields: exam code (prefill from `VITE_DEFAULT_EXAM_CODE`), candidate code. Submit
-`POST /api/public/join`. Store the attempt token in `sessionStorage` under
+`GET /api/dashboard/student`. Sections: stats, **Upcoming and available exams**, in-progress attempts,
+past attempts and the join-by-code card.
+
+`upcoming` lists enrolled exams that are `OPEN` and have no attempt yet. Each card shows the title,
+code, an "Open now" or "Scheduled" chip, "Opens …" / "Closes …", and for `openNow` a Join button that
+prefills the exam code in the join card (the candidate code is still typed by the student). Nothing
+scheduled renders an explicit empty state, not a blank panel.
+
+### 5.2 Join `/join`
+
+Fields: exam code (prefill from `VITE_DEFAULT_EXAM_CODE` or from the upcoming card), candidate code.
+Submit `POST /api/public/join`. Store the attempt token in `sessionStorage` under
 `examguard.attempt.<attemptId>` and navigate to `/attempt/:attemptId`. Handle 409 with a clear
-"already submitted" screen. Never store the token in a URL.
+"already submitted" screen and 401 with a "codes not accepted" screen; a roster refusal (403) explains
+that the account is not enrolled, and a schedule refusal (409) shows the opens/closes time. Never
+store the token in a URL.
 
-### 5.2 Exam `/attempt/:attemptId`
+### 5.3 Exam `/attempt/:attemptId`
 
 - Header: exam title, candidate code, countdown, save indicator, extension status.
 - Countdown uses `startedAt + durationMinutes` with a server-time offset captured from the join
@@ -145,7 +206,7 @@ Fields: exam code (prefill from `VITE_DEFAULT_EXAM_CODE`), candidate code. Submi
   success clear the draft and show the receipt. If the request fails, keep the attempt open.
 - Rejoin calls `GET /attempts/:attemptId`, restoring answers and showing a "resumed" toast.
 
-### 5.3 Extension connection panel
+### 5.4 Extension connection panel
 
 The attempt page shows **Connect monitoring extension** with:
 
@@ -220,12 +281,21 @@ frontend/src/
   api/            client.ts, types.ts, queries.ts
   auth/           AuthProvider.tsx, RequireStaff.tsx, RequireAttempt.tsx
   components/     AppShell.tsx, BandChip.tsx, CoverageBanner.tsx, EmptyState.tsx,
+                  DataTable.tsx, LoadingBlock.tsx, UnsavedChangesGuard.tsx,
                   EvidenceCard.tsx, AnswerComparison.tsx, EventTimeline.tsx
+  design/         tokens.ts
   features/
-    exams/        ExamListPage.tsx, CreateExamPage.tsx, ExamDetailPage.tsx
+    dashboard/    StudentDashboardPage.tsx, LecturerDashboardPage.tsx, AdminDashboardPage.tsx,
+                  ScoreDistributionChart.tsx, IntegrityTrendChart.tsx, BandMixChart.tsx,
+                  AttemptFunnelChart.tsx
+    exams/        ExamListPage.tsx, CreateExamPage.tsx, ExamDetailPage.tsx, ExamOverviewTab.tsx,
+                  QuestionsTab.tsx, AttemptsTab.tsx, FindingsTab.tsx, RunsTab.tsx,
+                  GradingTab.tsx, SettingsTab.tsx, ExamSettingsForm.tsx
     findings/     FindingDetailPage.tsx, DecisionPanel.tsx
-    student/      JoinPage.tsx, AttemptPage.tsx, SubmittedPage.tsx, ExtensionPanel.tsx
-  lib/            format.ts, domains.ts, autosave.ts, time.ts
+    student/      JoinPage.tsx, AttemptPage.tsx, SubmittedPage.tsx, ExtensionPanel.tsx,
+                  StudentDashboardPage.tsx, StudentReportPage.tsx
+  lib/            format.ts, domains.ts, autosave.ts, time.ts, tableState.ts
+  test/           msw fixtures, render helpers, a11y.test.tsx
   theme.ts
   router.tsx
   main.tsx
@@ -247,12 +317,26 @@ Minimum acceptance tests:
 7. Join handles 409 and 401 with the documented screens.
 8. Domain normalization strips scheme, path, query, port and `www.`.
 9. MSW handlers enforce the documented API shapes; a wrong shape fails the test.
+10. `lib/tableState.test.ts`: defaults, round-trip with unrelated params preserved, per-table key
+    prefixes plus the sort allowlist, and clearing defaults/bad page sizes.
+11. `SettingsTab.test.tsx`: settings save sends a `PATCH` body, invalid duration blocks the request,
+    roster add/remove call `POST`/`DELETE` and refetch.
+12. `QuestionsTab.test.tsx`: Preview renders the student `QuestionRenderer` (interactive), switching
+    back restores the authoring fields.
+13. `GradingTab.test.tsx`: keyboard next/previous moves "Candidate N of M", buttons match, and keys
+    typed inside the score input do not navigate.
+14. `a11y.test.tsx`: axe on login, join, student/lecturer/admin dashboards, exam overview, grading
+    split view and student report (colour-contrast excluded because jsdom has no layout); plus
+    `aria-modal="true"` and initial focus inside the integrity warning, question dialog and unsaved
+    changes guard.
 
 ## 9. Definition of done for the UI
 
 - The demo flow in `README.md` works with no console errors.
 - A reviewer can go from exam list to finding to decision in under a minute.
-- Keyboard navigation works on the exam, decision dialog and finding tabs; focus is trapped in
-  dialogs; color contrast passes WCAG AA.
+- Keyboard navigation works on the exam, decision dialog, finding tabs and the grading queue; focus is
+  trapped in dialogs; colour contrast passes WCAG AA.
 - Every score is labelled as review priority; every capped finding shows why.
 - No screen claims that the system has detected cheating.
+- A lecturer can enrol emails, set a schedule, edit settings after candidates join, and see it in the
+  audit trail; a student sees upcoming exams and is refused outside the schedule or roster.
