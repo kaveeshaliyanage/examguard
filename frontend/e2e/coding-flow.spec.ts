@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { completePreflight, DEMO_PIN } from './support/preflight';
 
 /**
  * Runs against the compose stack with demo data and the runner container. The seeded DEMO-103 exam
@@ -21,11 +22,12 @@ test('student submits a coding answer and the judge marks every test', async ({ 
   const joinCard = page.locator('form').filter({ has: page.getByLabel('Exam code') });
   await joinCard.getByLabel('Exam code').fill('DEMO-103');
   await joinCard.getByLabel('Candidate code').fill(candidateCode);
+  await joinCard.getByLabel('Exam PIN').fill(DEMO_PIN);
   await joinCard.getByRole('button', { name: 'Join', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Coding \(DSA\)/ })).toBeVisible({
     timeout: 45_000,
   });
-  await page.getByRole('button', { name: 'Begin exam' }).click();
+  await completePreflight(page);
 
   await expect(page.getByText('Question 1 of 3')).toBeVisible();
   await page
