@@ -10,11 +10,11 @@ import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { joinExam } from '../../api/attemptApi';
-import { writeAttemptSession } from '../../auth/storage';
+import { findAttemptSession, writeAttemptSession } from '../../auth/storage';
 import { EmptyState } from '../../components/EmptyState';
 import { StudentShell } from './StudentShell';
 
-type Failure = { kind: 'conflict' | 'rejected' | 'error'; message: string };
+type Failure = { kind: 'conflict' | 'locked' | 'rejected' | 'error'; message: string };
 
 export function JoinPage() {
   const navigate = useNavigate();
@@ -28,12 +28,15 @@ export function JoinPage() {
     setFailure(null);
     setBusy(true);
     try {
-      const response = await joinExam(examCode.trim(), candidateCode.trim());
+      const exam = examCode.trim();
+      const candidate = candidateCode.trim();
+      const resumed = findAttemptSession(exam, candidate);
+      const response = await joinExam(exam, candidate, resumed?.sessionToken);
       writeAttemptSession({
         attemptId: response.attemptId,
         sessionToken: response.sessionToken,
         collectorToken: response.collectorToken,
-        candidateCode: candidateCode.trim(),
+        candidateCode: candidate,
         examCode: response.exam.code,
       });
       navigate(`/attempt/${response.attemptId}/instructions`, { replace: true });
@@ -41,6 +44,8 @@ export function JoinPage() {
       if (caught instanceof ApiError) {
         if (caught.status === 409) {
           setFailure({ kind: 'conflict', message: caught.message });
+        } else if (caught.status === 403) {
+          setFailure({ kind: 'locked', message: caught.message });
         } else if (caught.status === 401 || caught.status === 404) {
           setFailure({ kind: 'rejected', message: caught.message });
         } else {
@@ -74,6 +79,18 @@ export function JoinPage() {
               /already (been )?submitted/i.test(failure.message) ? 'Already submitted' : 'Exam is not open'
             }
             body={`${failure.message}. If you believe this is wrong, contact your invigilator.`}
+            action={
+              <Button variant="outlined" onClick={reset}>
+                Back to join
+              </Button>
+            }
+          />
+        ) : null}
+
+        {failure?.kind === 'locked' ? (
+          <EmptyState
+            title="Could not resume this attempt"
+            body={`${failure.message}. If you opened the exam in another tab, continue there; otherwise ask your invigilator for help.`}
             action={
               <Button variant="outlined" onClick={reset}>
                 Back to join

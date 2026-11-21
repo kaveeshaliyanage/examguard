@@ -1,7 +1,9 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { writeAttemptSession } from '../../auth/storage';
+import { joinResponse } from '../../test/fixtures';
 import { server } from '../../test/server';
 import { renderRoute } from '../../test/render';
 import { JoinPage } from './JoinPage';
@@ -39,5 +41,40 @@ describe('JoinPage', () => {
     await attemptJoin();
     expect(await screen.findByText('Codes not accepted')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try different codes' })).toBeInTheDocument();
+  });
+
+  it('sends the stored attempt token when the codes match', async () => {
+    writeAttemptSession({
+      attemptId: 7,
+      sessionToken: 'stored-attempt-token',
+      collectorToken: 'stored-collector-token',
+      candidateCode: 'C001',
+      examCode: 'DEMO-101',
+    });
+    let body: Record<string, unknown> = {};
+    server.use(
+      http.post('/api/public/join', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(joinResponse);
+      }),
+    );
+
+    await attemptJoin();
+    await waitFor(() => expect(body.resumeToken).toBe('stored-attempt-token'));
+  });
+
+  it('shows the resume screen when the server rejects the proof', async () => {
+    server.use(
+      http.post('/api/public/join', () =>
+        HttpResponse.json(
+          { message: 'A resume token is required to continue this attempt' },
+          { status: 403 },
+        ),
+      ),
+    );
+
+    await attemptJoin();
+    expect(await screen.findByText('Could not resume this attempt')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to join' })).toBeInTheDocument();
   });
 });

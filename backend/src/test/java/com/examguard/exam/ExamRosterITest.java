@@ -138,12 +138,14 @@ class ExamRosterITest extends ApiTestBase {
         exam.setClosesAt(Instant.now().plus(1, ChronoUnit.HOURS));
         examRepository.save(exam);
 
-        joinGuest(exam.getCode(), "G-5").andExpect(status().isOk());
+        String first = joinGuest(exam.getCode(), "G-5").andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String resumeToken = json.readTree(first).get("sessionToken").asText();
 
         exam.setClosesAt(Instant.now().minus(1, ChronoUnit.MINUTES));
         examRepository.save(exam);
 
-        joinGuest(exam.getCode(), "G-5").andExpect(status().isOk());
+        joinGuest(exam.getCode(), "G-5", resumeToken).andExpect(status().isOk());
         joinGuest(exam.getCode(), "G-6").andExpect(status().isConflict());
     }
 
@@ -168,6 +170,15 @@ class ExamRosterITest extends ApiTestBase {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of(
                         "examCode", examCode, "candidateCode", candidateCode))));
+    }
+
+    private ResultActions joinGuest(String examCode, String candidateCode, String resumeToken)
+            throws Exception {
+        return mvc.perform(post("/api/public/join")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of(
+                        "examCode", examCode, "candidateCode", candidateCode,
+                        "resumeToken", resumeToken))));
     }
 
     private ResultActions joinWithToken(String bearer, String examCode, String candidateCode)

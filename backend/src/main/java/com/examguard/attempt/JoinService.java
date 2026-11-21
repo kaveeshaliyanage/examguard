@@ -22,6 +22,7 @@ import com.examguard.repo.ExamEnrollmentRepository;
 import com.examguard.repo.ExamRepository;
 import com.examguard.repo.QuestionRepository;
 import com.examguard.service.AuditService;
+import io.jsonwebtoken.Claims;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,11 +93,13 @@ public class JoinService {
         Attempt attempt = candidate == null ? null
                 : attemptRepository.findByExamIdAndCandidateId(exam.getId(), candidate.getId()).orElse(null);
 
-        // Window and roster gate opening a new attempt only; an in-progress attempt can
-        // always resume so no answers are stranded.
+        // Window and roster gate opening a new attempt only. An existing attempt can be
+        // resumed so no answers are stranded, but it needs proof that the caller owns it.
         if (attempt == null) {
             enforceJoinWindow(exam);
             enforceRoster(exam, student);
+        } else {
+            requireResumeProof(request.resumeToken(), attempt, student);
         }
         if (candidate == null) {
             candidate = createCandidate(exam, candidateCode);
@@ -118,10 +121,11 @@ public class JoinService {
         }
         attempt.setLastSeenAt(Instant.now());
         attemptRepository.save(attempt);
+        String attemptToken = jwtService.issueAttemptToken(attempt);
         return new JoinResponse(
                 attempt.getId(),
-                jwtService.issueAttemptToken(attempt),
-                jwtService.issueAttemptToken(attempt),
+                attemptToken,
+                attemptToken,
                 attempt.getStatus().name(),
                 attempt.getStartedAt(),
                 attempt.getSubmittedAt(),
@@ -131,12 +135,45 @@ public class JoinService {
                 latestAnswers(attempt));
     }
 
+    /**
+     * A candidate code is not a secret: it is printed on the paper. Resuming therefore needs the
+     * token issued at join, or an account that already owns the attempt.
+     */
+    private void requireResumeProof(String resumeToken, Attempt attempt, User student) {
+        User owner = attempt.getStudentUser();
+        if (student != null && owner != null && !owner.getId().equals(student.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "This attempt belongs to another student account");
+        }
+        if (resumeToken == null || resumeToken.isBlank()) {
+            if (student != null) {
+                return;
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "A resume token is required to continue this attempt");
+        }
+        Claims claims;
+        try {
+            claims = jwtService.parse(resumeToken.trim());
+        } catch (RuntimeException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "The resume token is not valid");
+        }
+        Object examId = claims.get("examId");
+        boolean matches = String.valueOf(attempt.getId()).equals(claims.getSubject())
+                && examId instanceof Number number
+                && number.longValue() == attempt.getExam().getId();
+        if (!matches) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The resume token does not match this attempt");
+        }
+    }
+
     private void linkStudent(Attempt attempt, User student) {
         User current = attempt.getStudentUser();
         if (current != null) {
             if (!current.getId().equals(student.getId())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "This attempt is linked to another student account");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "This attempt belongs to another student account");
             }
             return;
         }

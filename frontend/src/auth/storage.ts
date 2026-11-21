@@ -64,24 +64,54 @@ export function readAttemptSession(attemptId: number): AttemptSession | null {
   if (!raw) {
     return null;
   }
+  const session = parseAttemptSession(raw, attemptId);
+  if (session) {
+    return session;
+  }
+  sessionStorage.removeItem(attemptStorageKey(attemptId));
+  return null;
+}
+
+function parseAttemptSession(raw: string, attemptId?: number): AttemptSession | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (isRecord(parsed)) {
       const { sessionToken, collectorToken, candidateCode, examCode } = parsed;
       if (
-        parsed.attemptId === attemptId &&
+        typeof parsed.attemptId === 'number' &&
+        (attemptId === undefined || parsed.attemptId === attemptId) &&
         isString(sessionToken) &&
         isString(collectorToken) &&
         isString(candidateCode) &&
         isString(examCode)
       ) {
-        return { attemptId, sessionToken, collectorToken, candidateCode, examCode };
+        return { attemptId: parsed.attemptId, sessionToken, collectorToken, candidateCode, examCode };
       }
     }
   } catch {
-    // Fall through to clearing the stale value.
+    // A corrupt value is treated as absent.
   }
-  sessionStorage.removeItem(attemptStorageKey(attemptId));
+  return null;
+}
+
+/** Resume proof for the join form, which knows the codes but not the attempt id. */
+export function findAttemptSession(examCode: string, candidateCode: string): AttemptSession | null {
+  const targetExam = examCode.trim().toLowerCase();
+  const targetCandidate = candidateCode.trim().toLowerCase();
+  for (let index = 0; index < sessionStorage.length; index += 1) {
+    const key = sessionStorage.key(index);
+    if (!key || !key.startsWith('examguard.attempt.')) {
+      continue;
+    }
+    const session = parseAttemptSession(sessionStorage.getItem(key) ?? '');
+    if (
+      session &&
+      session.examCode.trim().toLowerCase() === targetExam &&
+      session.candidateCode.trim().toLowerCase() === targetCandidate
+    ) {
+      return session;
+    }
+  }
   return null;
 }
 

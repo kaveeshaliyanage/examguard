@@ -110,7 +110,7 @@ class StudentAccountIT extends ApiTestBase {
 
         join(first, exam.getCode(), candidateCode).andExpect(status().isOk());
         join(second, exam.getCode(), candidateCode)
-                .andExpect(status().isConflict());
+                .andExpect(status().isForbidden());
     }
 
     @Test

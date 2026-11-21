@@ -39,10 +39,14 @@ function isIntegritySignalResponse(value: unknown): boolean {
   );
 }
 
-export function joinExam(examCode: string, candidateCode: string): Promise<JoinResponse> {
+export function joinExam(
+  examCode: string,
+  candidateCode: string,
+  resumeToken?: string,
+): Promise<JoinResponse> {
   return request<JoinResponse>('/public/join', {
     method: 'POST',
-    body: { examCode, candidateCode },
+    body: resumeToken ? { examCode, candidateCode, resumeToken } : { examCode, candidateCode },
     validate: isJoinResponse,
   });
 }

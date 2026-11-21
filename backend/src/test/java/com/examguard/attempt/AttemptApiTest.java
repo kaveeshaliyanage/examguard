@@ -29,12 +29,32 @@ class AttemptApiTest extends ApiTestBase {
     }
 
     private JsonNode join(String examCode, String candidateCode) throws Exception {
-        String body = json.writeValueAsString(Map.of("examCode", examCode, "candidateCode", candidateCode));
+        return join(examCode, candidateCode, null);
+    }
+
+    private JsonNode join(String examCode, String candidateCode, String resumeToken) throws Exception {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("examCode", examCode);
+        payload.put("candidateCode", candidateCode);
+        if (resumeToken != null) {
+            payload.put("resumeToken", resumeToken);
+        }
+        String body = json.writeValueAsString(payload);
         String response = mvc.perform(post("/api/public/join")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return json.readTree(response);
+    }
+
+    private User student() {
+        User user = new User();
+        user.setEmail("student-" + UUID.randomUUID() + "@test.local");
+        user.setDisplayName("Test Student");
+        user.setPasswordHash(passwordEncoder.encode("TestPassword123!"));
+        user.setRole(Role.STUDENT);
+        user.setEnabled(true);
+        return userRepository.save(user);
     }
 
     @Test
@@ -44,7 +64,7 @@ class AttemptApiTest extends ApiTestBase {
         question(openExam, 1);
 
         JsonNode first = join(openExam.getCode(), "S-001");
-        JsonNode second = join(openExam.getCode(), "S-001");
+        JsonNode second = join(openExam.getCode(), "S-001", first.get("sessionToken").asText());
 
         assertThat(first.get("attemptId").asLong()).isEqualTo(second.get("attemptId").asLong());
         assertThat(first.get("sessionToken").asText()).isNotBlank();
@@ -178,10 +198,108 @@ class AttemptApiTest extends ApiTestBase {
                 joined.get("answers").get(0).get("questionId").asLong(), "too late", 9)
                 .andExpect(status().isConflict());
 
-        String rejoinBody = json.writeValueAsString(
-                Map.of("examCode", exam.getCode(), "candidateCode", "S-006"));
+        String rejoinBody = json.writeValueAsString(Map.of(
+                "examCode", exam.getCode(),
+                "candidateCode", "S-006",
+                "resumeToken", joined.get("sessionToken").asText()));
         mvc.perform(post("/api/public/join")
                         .contentType(MediaType.APPLICATION_JSON).content(rejoinBody))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void resumeNeedsTheAttemptTokenWhenNobodyIsSignedIn() throws Exception {
+        User owner = staff(Role.LECTURER);
+        Exam exam = exam(owner, uniqueCode(), ExamStatus.OPEN);
+        question(exam, 1);
+        JsonNode joined = join(exam.getCode(), "S-010");
+
+        mvc.perform(post("/api/public/join")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("examCode", exam.getCode(), "candidateCode", "S-010"))))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(post("/api/public/join")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of(
+                                "examCode", exam.getCode(),
+                                "candidateCode", "S-010",
+                                "resumeToken", "not-a-token"))))
+                .andExpect(status().isForbidden());
+
+        JsonNode resumed = join(exam.getCode(), "S-010", joined.get("sessionToken").asText());
+        assertThat(resumed.get("attemptId").asLong()).isEqualTo(joined.get("attemptId").asLong());
+    }
+
+    @Test
+    void resumeTokenFromAnotherAttemptIsRejected() throws Exception {
+        User owner = staff(Role.LECTURER);
+        Exam exam = exam(owner, uniqueCode(), ExamStatus.OPEN);
+        question(exam, 1);
+        join(exam.getCode(), "S-011");
+        JsonNode other = join(exam.getCode(), "S-012");
+
+        mvc.perform(post("/api/public/join")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of(
+                                "examCode", exam.getCode(),
+                                "candidateCode", "S-011",
+                                "resumeToken", other.get("sessionToken").asText()))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void signedInStudentCanResumeOwnAttemptButNotAnotherStudents() throws Exception {
+        User owner = staff(Role.LECTURER);
+        Exam exam = exam(owner, uniqueCode(), ExamStatus.OPEN);
+        question(exam, 1);
+        User student = student();
+        User otherStudent = student();
+
+        String studentToken = "Bearer " + jwtService.issueStudentToken(student);
+        String joinedBody = mvc.perform(post("/api/student/attempts/join")
+                        .header("Authorization", studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("examCode", exam.getCode(), "candidateCode", "S-013"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long attemptId = json.readTree(joinedBody).get("attemptId").asLong();
+
+        mvc.perform(post("/api/student/attempts/join")
+                        .header("Authorization", studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("examCode", exam.getCode(), "candidateCode", "S-013"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attemptId").value(attemptId));
+
+        mvc.perform(post("/api/student/attempts/join")
+                        .header("Authorization", "Bearer " + jwtService.issueStudentToken(otherStudent))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("examCode", exam.getCode(), "candidateCode", "S-013"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void openAttemptStillResumesAfterTheWindowCloses() throws Exception {
+        User owner = staff(Role.LECTURER);
+        Exam exam = exam(owner, uniqueCode(), ExamStatus.OPEN);
+        question(exam, 1);
+        JsonNode joined = join(exam.getCode(), "S-014");
+
+        exam.setClosesAt(Instant.now().minusSeconds(60));
+        examRepository.save(exam);
+
+        JsonNode resumed = join(exam.getCode(), "S-014", joined.get("sessionToken").asText());
+        assertThat(resumed.get("attemptId").asLong()).isEqualTo(joined.get("attemptId").asLong());
+
+        mvc.perform(post("/api/public/join")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(
+                                Map.of("examCode", exam.getCode(), "candidateCode", "S-015"))))
                 .andExpect(status().isConflict());
     }
 

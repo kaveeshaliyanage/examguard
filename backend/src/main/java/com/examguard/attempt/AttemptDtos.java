@@ -22,7 +22,8 @@ public final class AttemptDtos {
 
     public record JoinRequest(
             @NotBlank String examCode,
-            @NotBlank String candidateCode) {
+            @NotBlank String candidateCode,
+            String resumeToken) {
     }
 
     public record AttemptQuestionView(
