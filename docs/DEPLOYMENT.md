@@ -153,81 +153,176 @@ change the MEDIUM band ceiling. `/health` reports `authorshipAvailable` and `aut
 
 ## Cloud deployment: Render + Supabase + Vercel
 
-The managed path runs the same two containers as the VPS path:
-
 ```
-Vercel (SPA) --HTTPS--> Render examguard-api --HTTPS--> Render examguard-ai
-                              |
-                              +--> Supabase PostgreSQL 16
-```
-
-Only the API and the AI service are public. The SPA never talks to the AI service directly.
-
-### 1. Supabase (PostgreSQL 16)
-
-1. Create a project. Settings > Database shows two connection strings.
-2. Use the **direct** connection (`db.<ref>.supabase.co:5432`) for the API. A single long-lived
-   Render instance holds few connections, and Flyway needs a session-capable connection on the
-   first boot. Use the transaction pooler (`<region>.pooler.supabase.com:6543`,
-   `?prepareThreshold=0`) only if you scale to several API instances.
-3. Give the API a dedicated role rather than `postgres`; it needs DDL rights on the first deploy
-   because Flyway creates the schema.
-
-```
-DB_VENDOR=postgresql
-SPRING_DATASOURCE_URL=jdbc:postgresql://db.<ref>.supabase.co:5432/postgres?sslmode=require
-SPRING_DATASOURCE_USERNAME=examguard
-SPRING_DATASOURCE_PASSWORD=<password>
+Browser ──HTTPS──> Vercel (static SPA)
+   │
+   └──HTTPS──> Render examguard-api (Spring Boot) ──HTTPS + X-Analysis-Token──> Render examguard-ai
+                       │
+                       └──TLS──> Supabase PostgreSQL (session pooler, schema "examguard")
 ```
 
-Flyway picks `classpath:db/migration/postgresql` from `DB_VENDOR` and validates the result against
-the entity mappings (`ddl-auto: validate`). A mismatch fails startup rather than drifting silently.
+The browser calls the API directly (cross-origin), so CORS on the API names the Vercel origin.
+The analysis service is public because Render's free plan has no private services; it rejects
+any analysis call without the shared `ANALYSIS_TOKEN`. Deploy in the order below: each step needs
+a value from the one before it.
 
-### 2. Render
+### What the free plan means
 
-`render.yaml` at the repository root declares both services. Create a Blueprint and point it at the
-repository, then fill the secrets marked `sync: false` in the dashboard.
-
-| Service | Health check | Notes |
+| Limit | Effect | Mitigation |
 | --- | --- | --- |
-| `examguard-api` | `/actuator/health` | Java image, `SEED_DEMO_DATA=false`, generated `JWT_SECRET` |
-| `examguard-ai` | `/health` | Python image, models not shipped by default |
+| Render free instances sleep after 15 idle minutes | First request takes 30–60 s; nothing runs while asleep | Open the site a few minutes before an exam. Students' heartbeats keep it awake during the exam |
+| Deadline job sleeps with the API | An attempt that expires while asleep is auto-submitted a few seconds after wake-up | `submittedAt` is stamped with the deadline itself, and saves past the deadline are always rejected |
+| No code runner | Coding answers stay **ungraded** (never scored zero) | Add a paid private service for the runner later |
+| 512 MB RAM per instance | JVM limited via `JAVA_TOOL_OPTIONS` in `render.yaml` | Move to Starter if the API restarts under load (Render shows "Out of memory" in events) |
+| Render free: 750 instance-hours per workspace per month | Two always-awake services would exceed it | Sleeping instances do not use hours; do not add an uptime pinger to both |
+| Supabase free pauses a project after 7 days without traffic | The API fails its health check until you resume the project | Resume it in the Supabase dashboard before an exam, or upgrade |
+| Supabase free has no automatic backups you can restore | Data loss risk | Run the `pg_dump` below before each exam and after grading |
 
-Set `ANALYSIS_BASE_URL` to the AI service's public URL and `CORS_ALLOWED_ORIGINS` to the Vercel
-production domain. Do not use a wildcard: the SPA is the only browser client.
+For real exams with stakes, move the API to Render Starter (always on) and Supabase Pro (daily
+backups). Nothing else changes.
 
-Starter and free instances spin down when idle; the first request afterwards takes 30–60 seconds.
-Add an uptime ping on `/health` if the AI service must stay warm during an exam window, or move to a
-paid plan for exam days.
+### 1. Supabase (database)
 
-Learned fusion stays off (`USE_LEARNED_FUSION=false`) until the artifacts are copied into `ai/models`.
-The deployment then uses rule weights and the response reports the rule fusion mode.
+1. Create a project at <https://supabase.com/dashboard>. Pick region **Central EU (Frankfurt)**
+   to sit next to Render's `frankfurt` region. Save the database password it shows.
+2. **SQL Editor → New query**: paste [`deploy/supabase-setup.sql`](../deploy/supabase-setup.sql),
+   replace the placeholder password with a long random one (`openssl rand -base64 32 | tr -d '/+='`),
+   and run it. It creates the `examguard` role and a private `examguard` schema. ExamGuard does
+   not use the `public` schema, because Supabase's Data API exposes `public` to the anon key.
+3. Optional but recommended: **Project Settings → Data API**: turn the Data API off. ExamGuard
+   never uses it.
+4. **Connect** (top bar) → **Session pooler**. Note the host, e.g.
+   `aws-0-eu-central-1.pooler.supabase.com`, port `5432`, and the project ref in the user name
+   (`postgres.<ref>`).
 
-### 3. Vercel
+   Use the **session pooler**, not the direct connection (`db.<ref>.supabase.co`): the direct host
+   is IPv6-only and Render cannot reach it. Do not use the transaction pooler (port `6543`);
+   Flyway needs a session.
 
-Import the repository, set the root directory to `frontend`, and keep the Vite preset. `vercel.json`
-rewrites every path to `index.html` so client-side routes survive a refresh. It does **not** proxy
-`/api`, so a relative base would silently hit the static site.
+The Render values, built from that:
 
-| Variable | Value |
-| --- | --- |
-| `VITE_API_BASE` | `https://examguard-api.onrender.com/api` (absolute; must include `/api`) |
-| `VITE_DEFAULT_EXAM_CODE` | optional, join-page default |
+```
+SPRING_DATASOURCE_URL=jdbc:postgresql://aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require&currentSchema=examguard
+SPRING_DATASOURCE_USERNAME=examguard.<project-ref>
+SPRING_DATASOURCE_PASSWORD=<the password you put in supabase-setup.sql>
+```
 
-`VITE_API_BASE` is read at build time (`frontend/src/api/client.ts`), so set it before deploying and
-rebuild after changing it. The default is `/api`, which is only correct behind the nginx proxy.
+On first boot Flyway creates every table in `examguard` and Hibernate validates the result
+(`ddl-auto: validate`); a mismatch stops startup instead of drifting. The schema must be empty
+before the first boot.
 
-The browser calls the API cross-origin in this topology, so the API's `CORS_ALLOWED_ORIGINS` must
-contain the exact Vercel origin (preview deployments included, if you use them).
+### 2. Render (API + analysis service)
 
-### 4. Cloud smoke test
+1. Merge to `main`; Render deploys from `main` only.
+2. <https://dashboard.render.com> → **New → Blueprint** → connect GitHub and pick this repository.
+   Render reads [`render.yaml`](../render.yaml) and shows two services plus the
+   `examguard-shared` environment group.
+3. Fill the prompted values:
+
+   | Key | Value |
+   | --- | --- |
+   | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | from step 1 |
+   | `ANALYSIS_BASE_URL` | `https://examguard-ai.onrender.com` (adjust if Render added a suffix to the name) |
+   | `CORS_ALLOWED_ORIGINS` | your Vercel production URL, e.g. `https://examguard.vercel.app`. Use a placeholder now and correct it after step 3 |
+   | `BOOTSTRAP_ADMIN_EMAIL` | the first administrator's email |
+   | `BOOTSTRAP_ADMIN_PASSWORD` | 12+ characters; you change it after the first sign-in |
+   | `MAIL_HOST`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM` | your SMTP relay, or leave empty while `MAIL_ENABLED=false` |
+
+   `JWT_SECRET` and `ANALYSIS_TOKEN` are generated by Render; never set them by hand.
+4. **Apply**. The first API build takes about 5–10 minutes. Watch **Logs** for
+   `Created the bootstrap administrator` and `Started ExamGuardApplication`.
+5. Copy the API's URL (e.g. `https://examguard-api.onrender.com`) for step 3.
+
+`autoDeployTrigger: checksPass` makes Render wait for GitHub CI to pass on `main` before each
+deploy, and `buildFilter` rebuilds a service only when its own folder changed.
+
+The PIN and login throttles count failures per client address, taken from Render's
+`X-Forwarded-For` (`server.forward-headers-strategy: native`, trusting private-range proxies). If
+five wrong PINs from one student start blocking everyone, Render's proxy is connecting from
+outside those ranges: set `SERVER_TOMCAT_REMOTEIP_INTERNALPROXIES` to a regex matching it.
+
+`/actuator/health` deliberately ignores SMTP, so a mail outage never takes the API offline.
+
+**PIN email**: set `MAIL_ENABLED=true` and the `MAIL_*` values for a relay such as Resend, Brevo,
+Postmark or SendGrid (SMTP port 587, STARTTLS). Until then the lecturer reads the PIN from the
+**Access PIN** card.
+
+### 3. Vercel (frontend)
+
+1. <https://vercel.com/new> → import this repository.
+2. **Root Directory**: `frontend`. The Vite preset and [`frontend/vercel.json`](../frontend/vercel.json)
+   supply the build. **Production Branch** (Settings → Git): `main`.
+3. Environment variable (Production):
+
+   | Variable | Value |
+   | --- | --- |
+   | `VITE_API_BASE` | `https://examguard-api.onrender.com/api` (absolute, ends in `/api`) |
+   | `VITE_DEFAULT_EXAM_CODE` | optional join-page default |
+
+   `VITE_API_BASE` is baked in at build time. A Vercel build without an absolute `https://…/api`
+   value fails on purpose instead of shipping a site whose API calls hit the static files.
+4. Deploy, then copy the production domain back into Render's `CORS_ALLOWED_ORIGINS` (exact
+   origin, no trailing slash; comma-separate a custom domain too). Saving it redeploys the API.
+
+`vercel.json` sends security headers on every page: a Content-Security-Policy that only allows
+API calls to `https://*.onrender.com`, `Permissions-Policy` granting the camera, microphone and
+fullscreen to this site only (the pre-exam wizard needs all three), HSTS, `X-Frame-Options: DENY`
+and immutable caching for hashed assets. **If you move the API to a custom domain, add it to
+`connect-src` in `vercel.json`**, or every API call is blocked by the browser.
+
+Preview deployments get random URLs that are not in `CORS_ALLOWED_ORIGINS`; they load but cannot
+call the API. That is intentional.
+
+### 4. First sign-in and smoke test
 
 ```bash
-curl -fsS https://examguard-api.onrender.com/actuator/health
-curl -fsS https://examguard-ai.onrender.com/health
-curl -fsS https://<app>.vercel.app/ > /dev/null
-# then sign in through the browser and confirm /api/exams returns for a lecturer
+curl -fsS https://examguard-api.onrender.com/actuator/health   # {"status":"UP"}
+curl -fsS https://examguard-ai.onrender.com/health             # "status":"UP"
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://examguard-ai.onrender.com/analyze/pairs -H 'Content-Type: application/json' -d '{}'
+# 401: the analysis service refuses calls without the token
 ```
+
+1. Open the Vercel URL → `/login` and sign in with the bootstrap administrator.
+2. In Render, delete `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`. They are ignored once
+   an admin exists, but should not linger. There is no password-change screen yet, so the
+   bootstrap password stays the admin password: make it long and keep it in a password manager.
+3. Create lecturer and reviewer accounts. The portal has no user-management screen yet, so use
+   the admin API:
+
+   ```bash
+   API=https://examguard-api.onrender.com/api
+   TOKEN=$(curl -fsS -X POST $API/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"admin@your-domain.example","password":"<admin password>"}' | jq -r .token)
+   curl -fsS -X POST $API/admin/users -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"lecturer@your-domain.example","displayName":"Dr Lecturer","password":"<12+ chars>","role":"LECTURER"}'
+   ```
+
+   `role` is `ADMIN`, `LECTURER` or `REVIEWER`. Students register themselves on `/student`.
+4. As a lecturer: create an exam, issue a PIN, join it from a private window as a student, pass
+   the pre-exam checks (camera, microphone and fullscreen prompts must appear), answer, submit.
+5. Run analysis on the exam; findings appearing proves the API reaches the analysis service with
+   the token.
+
+### Cloud backup and restore
+
+Supabase free keeps no backups you can restore. From a machine with PostgreSQL 16 client tools:
+
+```bash
+pg_dump "postgresql://examguard.<ref>:<password>@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+  --schema=examguard --no-owner --format=custom --file=examguard-$(date +%F).dump
+
+# restore into an empty examguard schema
+pg_restore --dbname="<same connection string>" --no-owner --schema=examguard examguard-YYYY-MM-DD.dump
+```
+
+### Cloud rollback
+
+Render → service → **Events** → pick an earlier successful deploy → **Rollback**. Vercel →
+**Deployments** → earlier deployment → **Promote to Production**. Flyway migrations are
+forward-only: if a release added a migration, restore the pre-release dump instead of rolling the
+API back onto a newer schema.
 
 ## Backup
 

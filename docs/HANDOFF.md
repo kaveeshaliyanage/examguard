@@ -208,6 +208,33 @@ Measured on this pass (Windows 11, Docker Desktop 29.9.2, compose stack on non-d
 | Mailpit | Issuing a PIN on `DEMO-103` delivered "Your ExamGuard PIN for DEMO-103" to `student@examguard.local` from `no-reply@examguard.local`; the seeded hash was restored afterwards |
 | Frontend | ESLint clean, `tsc --noEmit` clean, 91 unit tests across 26 files, production bundle 362.9 kB gzip (budget 420 kB) |
 
+## 1g. Cloud production pass: Render free + Supabase + Vercel (2026-11-21)
+
+| Change | Why |
+| --- | --- |
+| `server.forward-headers-strategy: native` | Behind Render or nginx every request came from the proxy, so five wrong PINs from anyone locked a whole exam out of new joins, and the student login throttle was global. Tomcat now takes the client from `X-Forwarded-For`, trusting only private-range proxies |
+| `management.health.mail.enabled: false` | The mail starter added an SMTP health check: with no relay `/actuator/health` returned 503 and Render would never have marked the API live |
+| `AdminBootstrap` (`BOOTSTRAP_ADMIN_*`) | With demo seeding off, a fresh database had no account that could sign in or create users. Runs only while no ADMIN exists; refuses short passwords and existing addresses |
+| `ANALYSIS_TOKEN` (`X-Analysis-Token`) | Render's free plan has no private services, so the analysis service is public; it now rejects analysis calls without the shared secret when the variable is set |
+| Auto-submit stamps the deadline | A sleeping free instance expires overdue attempts on wake; `submittedAt` is the deadline, not the wake-up time |
+| `DB_POOL_SIZE`, `JAVA_TOOL_OPTIONS` | Fit Supabase's pooler limits and Render's 512 MB |
+| `render.yaml` | Free plans, deploys from `main` only after CI passes, per-folder build filters, generated shared token |
+| `frontend/vercel.json`, `vite.config.ts` | CSP, Permissions-Policy (camera/mic/fullscreen), HSTS, asset caching; a Vercel build without an absolute `VITE_API_BASE` fails |
+| `deploy/supabase-setup.sql` | Dedicated `examguard` role and private schema, so the Data API never serves ExamGuard tables |
+
+Verified locally: backend 123 tests, 0 failures, 1 skipped; AI API tests 6/6. The backend image ran
+under `--memory=512m` with the Render JVM flags against PostgreSQL 16 prepared by
+`supabase-setup.sql`: five migrations into `examguard`, health `UP`, ~320 MiB used, bootstrap admin
+created and able to create a lecturer, CORS allowed only the configured origin, and five bad logins
+from one forwarded IP returned 429 while another IP still got 401. Not verified: an actual Render,
+Supabase or Vercel account (no CLI or credentials on the build machine), and which address
+Render's proxy connects from. If throttling still looks global on Render, set
+`SERVER_TOMCAT_REMOTEIP_INTERNALPROXIES`.
+
+Known gaps for this topology: no code runner (coding answers stay ungraded), no password-change
+or user-management screen (staff accounts are created through `POST /api/admin/users`), free-tier
+sleep and Supabase pausing (see `docs/DEPLOYMENT.md`).
+
 ## 2. Known gaps
 
 - The CD deploy job is written but has never touched a VPS; `scripts/deploy.sh` was only syntax
