@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --pretty false",
+    "lint": "eslint src",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -28,6 +29,7 @@
     "recharts": "^2.15.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.65.0",
     "@testing-library/jest-dom": "^6.4.8",
     "@testing-library/react": "^16.0.0",
@@ -36,10 +38,13 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "axe-core": "^4.14.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "jsdom": "^24.1.1",
     "msw": "^2.4.9",
     "prettier": "^3.3.3",
     "typescript": "^5.5.4",
+    "typescript-eslint": "^8.72.1",
     "vite": "^5.4.0",
     "vitest": "^2.0.5"
   }

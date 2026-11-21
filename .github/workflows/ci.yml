@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: [main, develop]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,6 +17,7 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -26,6 +31,7 @@ jobs:
 
   backend-postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -57,6 +63,7 @@ jobs:
 
   ai:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,6 +80,7 @@ jobs:
 
   ai-eval:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -106,6 +114,7 @@ jobs:
 
   runner:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Build the sandbox image
@@ -114,6 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
+            -e RUNNER_TOKEN=test-runner-token \
             -v "$PWD/runner/tests:/app/tests:ro" \
             -v "$PWD/runner/requirements-dev.txt:/app/requirements-dev.txt:ro" \
             examguard-runner \
@@ -121,6 +131,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -129,6 +140,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
         working-directory: frontend
       - run: npm run typecheck
         working-directory: frontend
@@ -141,6 +154,7 @@ jobs:
 
   extension:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -175,11 +189,36 @@ jobs:
       - name: Prepare environment
         run: |
           cp .env.example .env
+          sed -i '/^RUNNER_TOKEN=/d' .env
           printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'RUNNER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+          printf 'SEED_DEMO_DATA=true\n' >> .env
       - name: Build images
         run: docker compose build
       - name: Start stack
         run: docker compose up -d --wait --wait-timeout 420
+      - name: Exercise the code runner with its token
+        run: |
+          set -euo pipefail
+          STATUS=$(docker compose exec -T runner python - <<'PY'
+          import json, os, urllib.request
+          payload = json.dumps({
+              "language": "PYTHON",
+              "source": "print(6 * 7)",
+              "tests": [{"input": "", "expectedOutput": "42"}],
+              "timeLimitMs": 5000,
+          }).encode()
+          request = urllib.request.Request(
+              "http://127.0.0.1:8000/run",
+              data=payload,
+              headers={"Content-Type": "application/json",
+                       "X-Runner-Token": os.environ["RUNNER_TOKEN"]},
+          )
+          with urllib.request.urlopen(request, timeout=120) as response:
+              print(json.load(response)["tests"][0]["status"])
+          PY
+          )
+          test "$STATUS" = "PASSED"
       - name: Smoke test the running stack
         run: |
           set -euo pipefail
