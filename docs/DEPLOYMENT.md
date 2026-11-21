@@ -183,8 +183,8 @@ backups). Nothing else changes.
 
 ### 1. Supabase (database)
 
-1. Create a project at <https://supabase.com/dashboard>. Pick region **Central EU (Frankfurt)**
-   to sit next to Render's `frankfurt` region. Save the database password it shows.
+1. Create a project at <https://supabase.com/dashboard>. Pick region **Southeast Asia (Singapore)**
+   to sit next to Render's `singapore` region (both must match; change `region` in `render.yaml` if you pick another). Save the database password it shows.
 2. **SQL Editor → New query**: paste [`deploy/supabase-setup.sql`](../deploy/supabase-setup.sql),
    replace the placeholder password with a long random one (`openssl rand -base64 32 | tr -d '/+='`),
    and run it. It creates the `examguard` role and a private `examguard` schema. ExamGuard does
@@ -192,7 +192,7 @@ backups). Nothing else changes.
 3. Optional but recommended: **Project Settings → Data API**: turn the Data API off. ExamGuard
    never uses it.
 4. **Connect** (top bar) → **Session pooler**. Note the host, e.g.
-   `aws-0-eu-central-1.pooler.supabase.com`, port `5432`, and the project ref in the user name
+   `aws-1-ap-southeast-1.pooler.supabase.com`, port `5432`, and the project ref in the user name
    (`postgres.<ref>`).
 
    Use the **session pooler**, not the direct connection (`db.<ref>.supabase.co`): the direct host
@@ -202,7 +202,7 @@ backups). Nothing else changes.
 The Render values, built from that:
 
 ```
-SPRING_DATASOURCE_URL=jdbc:postgresql://aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require&currentSchema=examguard
+SPRING_DATASOURCE_URL=jdbc:postgresql://aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&currentSchema=examguard
 SPRING_DATASOURCE_USERNAME=examguard.<project-ref>
 SPRING_DATASOURCE_PASSWORD=<the password you put in supabase-setup.sql>
 ```
@@ -310,7 +310,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 Supabase free keeps no backups you can restore. From a machine with PostgreSQL 16 client tools:
 
 ```bash
-pg_dump "postgresql://examguard.<ref>:<password>@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+pg_dump "postgresql://examguard.<ref>:<password>@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require" \
   --schema=examguard --no-owner --format=custom --file=examguard-$(date +%F).dump
 
 # restore into an empty examguard schema

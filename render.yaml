@@ -24,7 +24,7 @@ services:
     name: examguard-api
     runtime: docker
     plan: free
-    region: frankfurt
+    region: singapore
     branch: main
     # Redeploy only after GitHub CI passes on main, and only when backend code changed.
     autoDeployTrigger: checksPass
@@ -41,7 +41,7 @@ services:
       - key: DB_VENDOR
         value: postgresql
       # Supabase session pooler, e.g.
-      # jdbc:postgresql://aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require&currentSchema=examguard
+      # jdbc:postgresql://aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&currentSchema=examguard
       - key: SPRING_DATASOURCE_URL
         sync: false
       # Pooler user name: examguard.<project-ref>
@@ -99,7 +99,7 @@ services:
     name: examguard-ai
     runtime: docker
     plan: free
-    region: frankfurt
+    region: singapore
     branch: main
     autoDeployTrigger: checksPass
     buildFilter:
