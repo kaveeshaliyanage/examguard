@@ -292,8 +292,26 @@ export function DataTable<T>({
                   <TableRow
                     key={row.id}
                     hover
+                    tabIndex={onRowClick ? 0 : undefined}
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                    sx={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                    onKeyDown={
+                      onRowClick
+                        ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onRowClick(row.original);
+                            }
+                          }
+                        : undefined
+                    }
+                    sx={{
+                      cursor: onRowClick ? 'pointer' : 'default',
+                      '&:focus-visible': {
+                        outline: '2px solid',
+                        outlineColor: 'primary.main',
+                        outlineOffset: -2,
+                      },
+                    }}
                   >
                     {row.getVisibleCells().map((cell) => {
                       const config = columnConfig.get(cell.column.id);
