@@ -55,3 +55,6 @@ frontend/test-results/
 # runner
 runner/.pytest_cache/
 runner/**/__pycache__/
+
+# vercel cli link
+.vercel/
