@@ -6,73 +6,40 @@ import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
+import Divider from '@mui/material/Divider';
 import LinearProgress from '@mui/material/LinearProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
+import FlagIcon from '@mui/icons-material/Flag';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { submitAttempt } from '../../api/attemptApi';
-import type { AttemptState, ExamQuestion, SubmitResponse } from '../../api/types';
+import type { AnswerView, AttemptState, ExamQuestion, SubmitResponse } from '../../api/types';
 import { writeAttemptReceipt, type AttemptSession } from '../../auth/storage';
+import { UnsavedChangesGuard } from '../../components/UnsavedChangesGuard';
+import { useToast } from '../../components/ToastProvider';
+import { integrityToneFor, integrityTones } from '../../design/tokens';
+import { formatDurationMinutes, humanize } from '../../lib/format';
 import { AttemptStatusChip, ExamHeader } from './AttemptHeader';
 import { ExtensionPanel } from './ExtensionPanel';
+import { IntegrityWarningDialog } from './IntegrityWarningDialog';
+import { QuestionNavigator } from './QuestionNavigator';
+import { QuestionRenderer } from './QuestionRenderer';
 import { SaveIndicator } from './SaveIndicator';
 import { StudentShell } from './StudentShell';
+import { TerminatedScreen } from './TerminatedScreen';
 import { useAutosave } from './useAutosave';
 import { useCountdown } from './useCountdown';
+import { useIntegrityMonitor } from './useIntegrityMonitor';
+import { useRuntimeSignals } from './useRuntimeSignals';
 
-function wordCount(text: string): number {
-  return text.trim().length === 0 ? 0 : text.trim().split(/\s+/).length;
-}
-
-function QuestionField({
-  question,
-  index,
-  text,
-  disabled,
-  onChange,
-  onBlur,
-}: {
-  question: ExamQuestion;
-  index: number;
-  text: string;
-  disabled: boolean;
-  onChange: (text: string) => void;
-  onBlur: () => void;
-}) {
-  const count = wordCount(text);
-  const over = count > question.maxWords;
-  return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Typography variant="subtitle1" gutterBottom>
-        Q{question.orderIndex ?? index + 1}. {question.prompt}
-      </Typography>
-      <TextField
-        value={text}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        disabled={disabled}
-        multiline
-        minRows={4}
-        maxRows={16}
-        fullWidth
-        placeholder="Type your answer here. It saves automatically."
-        error={over}
-        helperText={`${count} / ${question.maxWords} words${over ? ' — over the limit' : ''}`}
-        inputProps={{ 'aria-label': `Answer for question ${question.orderIndex ?? index + 1}` }}
-      />
-    </Paper>
-  );
-}
-
-function receiptFor(
-  state: AttemptState,
-  session: AttemptSession,
-  response: SubmitResponse,
-): void {
+function receiptFor(state: AttemptState, session: AttemptSession, response: SubmitResponse): void {
   writeAttemptReceipt({
     attemptId: state.attemptId,
     candidateCode: session.candidateCode,
@@ -83,6 +50,25 @@ function receiptFor(
   });
 }
 
+function answerIsEmpty(text: string | undefined, selected: string[] | undefined): boolean {
+  return (text ?? '').trim().length === 0 && (selected ?? []).length === 0;
+}
+
+/** The attempt payload may omit untouched questions; autosave still needs an entry for each. */
+function withEveryQuestion(questions: ExamQuestion[], answers: AnswerView[]): AnswerView[] {
+  const byId = new Map(answers.map((answer) => [answer.questionId, answer]));
+  return questions.map(
+    (question) =>
+      byId.get(question.id) ?? {
+        questionId: question.id,
+        text: question.type === 'CODE' ? question.content?.starterCode ?? '' : '',
+        selectedOptions: [],
+        revisionNo: 0,
+        savedAt: null,
+      },
+  );
+}
+
 export function AttemptEditor({
   state,
   session,
@@ -91,145 +77,446 @@ export function AttemptEditor({
   session: AttemptSession;
 }) {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resumeDismissed, setResumeDismissed] = useState(false);
+  const [activeId, setActiveId] = useState<number>(state.exam.questions[0]?.id ?? 0);
+  const [flagged, setFlagged] = useState<Set<number>>(() => new Set());
+  const [strikeCount, setStrikeCount] = useState(state.strikeCount ?? 0);
+  const [maxStrikes, setMaxStrikes] = useState(state.maxStrikes ?? state.exam.maxStrikes ?? 3);
+  const [terminated, setTerminated] = useState(state.status === 'TERMINATED');
+  const [termination, setTermination] = useState({
+    at: state.terminatedAt,
+    reason:
+      state.terminationReason ??
+      (state.status === 'TERMINATED' ? 'The attempt was terminated after repeated focus loss.' : null),
+  });
+  const [warning, setWarning] = useState<number | null>(null);
+  const [integrityError, setIntegrityError] = useState<string | null>(null);
+  const [fullscreenLost, setFullscreenLost] = useState(false);
+  const [autosaveStopped, setAutosaveStopped] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const questions = state.exam.questions;
+  const initialAnswers = useMemo(() => withEveryQuestion(questions, state.answers), [questions, state.answers]);
 
   const autosave = useAutosave({
     attemptId: state.attemptId,
     token: session.sessionToken,
-    initialAnswers: state.answers,
-    enabled: state.status === 'IN_PROGRESS',
+    initialAnswers,
+    enabled: state.status === 'IN_PROGRESS' && !terminated,
     onUnauthorized: () => navigate('/join', { replace: true }),
+    onSaveStopped: (caught) => {
+      setAutosaveStopped(caught.message);
+      showToast('Autosave stopped. Your latest text is kept in this tab.', { severity: 'error' });
+    },
   });
 
   const submit = useCallback(
     async (auto: boolean) => {
-      if (submittingRef.current) {
+      if (submittingRef.current || terminated) {
         return;
       }
       submittingRef.current = true;
       setSubmitting(true);
       setError(null);
       try {
-        await autosave.flushAll();
+        if (auto) {
+          // Past the deadline the server rejects late edits with 409. Those edits cannot be kept
+          // anyway, so a failed flush must not block submitting the answers saved in time.
+          await autosave.flushAll().catch(() => undefined);
+        } else {
+          await autosave.flushAll();
+        }
         const response = await submitAttempt(state.attemptId, session.sessionToken);
         receiptFor(state, session, response);
         navigate(`/attempt/${state.attemptId}/submitted`, { replace: true });
       } catch (caught) {
-        const message =
-          caught instanceof ApiError
+        const message = auto
+          ? 'Time is up but the submission did not reach the server. Your saved answers are kept; submit again.'
+          : caught instanceof ApiError
             ? caught.message
-            : auto
-              ? 'Time is up but the submission did not reach the server. Please submit again.'
-              : 'Could not submit the exam. Your attempt is still open; please retry.';
+            : 'Could not submit the exam. Your attempt is still open; please retry.';
         setError(message);
         setConfirmOpen(false);
         submittingRef.current = false;
         setSubmitting(false);
       }
     },
-    [autosave, navigate, session, state],
+    [autosave, navigate, session, state, terminated],
   );
 
   const countdown = useCountdown({
-    startedAt: state.startedAt,
+    startedAt: state.activeStartedAt ?? state.startedAt,
     durationMinutes: state.exam.durationMinutes,
     serverNow: state.serverNow,
-    enabled: state.status === 'IN_PROGRESS' && !submitting,
+    enabled: state.status === 'IN_PROGRESS' && !submitting && !terminated,
     onExpire: () => {
       void submit(true);
     },
   });
 
-  const unanswered = useMemo(
-    () =>
-      state.exam.questions.filter(
-        (question) => (autosave.answers[question.id]?.text ?? '').trim().length === 0,
-      ),
-    [autosave.answers, state.exam.questions],
+  const applyTermination = useCallback((at: string | null, reason: string | null) => {
+    setTerminated(true);
+    setWarning(null);
+    setTermination({ at, reason });
+  }, []);
+
+  const handleSignal = useCallback(
+    (result: { strikeCount: number; maxStrikes: number; terminated: boolean; status: string }, signal: string) => {
+      setStrikeCount(result.strikeCount);
+      setMaxStrikes(result.maxStrikes);
+      if (result.terminated || result.status === 'TERMINATED') {
+        applyTermination(new Date().toISOString(), 'Three focus losses were recorded during the attempt.');
+        return;
+      }
+      if (signal === 'FOCUS_RETURN') {
+        setWarning(result.strikeCount);
+      }
+    },
+    [applyTermination],
   );
 
+  useIntegrityMonitor({
+    attemptId: state.attemptId,
+    token: session.sessionToken,
+    enabled: state.status === 'IN_PROGRESS' && !terminated,
+    paused: warning !== null,
+    onSignal: handleSignal,
+    onError: () => {
+      setIntegrityError(
+        'A focus change could not be recorded on the server. Stay in this window and keep this tab open; the attempt is still running.',
+      );
+    },
+  });
+
+  const monitoring = state.status === 'IN_PROGRESS' && !terminated;
+  useRuntimeSignals({
+    attemptId: state.attemptId,
+    token: session.sessionToken,
+    enabled: monitoring && state.requiresPreflight,
+  });
+
+  useEffect(() => {
+    if (!state.requiresPreflight || typeof document === 'undefined') {
+      return undefined;
+    }
+    const sync = () =>
+      setFullscreenLost(document.fullscreenEnabled === true && document.fullscreenElement === null);
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, [state.requiresPreflight]);
+
+  const reenterFullscreen = () => {
+    if (typeof document.documentElement.requestFullscreen !== 'function') {
+      setFullscreenLost(false);
+      return;
+    }
+    document.documentElement.requestFullscreen().catch(() => undefined);
+  };
+
+  const activeIndex = Math.max(
+    0,
+    questions.findIndex((question) => question.id === activeId),
+  );
+  const activeQuestion: ExamQuestion | undefined = questions[activeIndex];
+  const draft = activeQuestion ? autosave.answers[activeQuestion.id] : undefined;
+  const currentValue = {
+    text: draft?.text ?? '',
+    selectedOptions: draft?.selectedOptions ?? [],
+  };
+
+  const navigatorAnswers = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(autosave.answers).map(([key, value]) => [
+          Number(key),
+          { text: value.text, selectedOptions: value.selectedOptions },
+        ]),
+      ) as Record<number, { text: string; selectedOptions: string[] }>,
+    [autosave.answers],
+  );
+
+  const unanswered = useMemo(
+    () =>
+      questions.filter((question) => {
+        const answer = autosave.answers[question.id];
+        return answerIsEmpty(answer?.text, answer?.selectedOptions);
+      }),
+    [autosave.answers, questions],
+  );
+
+  const remainingStrikes = Math.max(0, maxStrikes - strikeCount);
+  const tone = integrityTones[integrityToneFor(remainingStrikes, maxStrikes)];
   const resumed = !resumeDismissed && state.answers.some((answer) => answer.text.trim().length > 0);
+
+  const goTo = (offset: number) => {
+    const next = questions[activeIndex + offset];
+    if (next) {
+      setActiveId(next.id);
+    }
+  };
+
+  const toggleFlag = () => {
+    if (!activeQuestion) {
+      return;
+    }
+    setFlagged((previous) => {
+      const next = new Set(previous);
+      if (next.has(activeQuestion.id)) {
+        next.delete(activeQuestion.id);
+      } else {
+        next.add(activeQuestion.id);
+      }
+      return next;
+    });
+  };
+
+  if (terminated) {
+    return (
+      <StudentShell title={state.exam.title} maxWidth="lg">
+        <TerminatedScreen
+          examTitle={state.exam.title}
+          candidateCode={session.candidateCode}
+          attemptId={state.attemptId}
+          terminatedAt={termination.at}
+          reason={termination.reason}
+          strikeCount={strikeCount}
+          maxStrikes={maxStrikes}
+          questions={questions}
+          answers={navigatorAnswers}
+        />
+      </StudentShell>
+    );
+  }
 
   return (
     <StudentShell
       title={state.exam.title}
+      maxWidth="xl"
       right={
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <Chip
             label={`Time remaining ${countdown.label}`}
             color={countdown.expired ? 'error' : countdown.warning ? 'warning' : 'default'}
             variant={countdown.expired || countdown.warning ? 'filled' : 'outlined'}
+            aria-label="Time remaining"
           />
           <SaveIndicator status={autosave.overallStatus} lastSavedAt={autosave.lastSavedAt} />
+          <Chip
+            size="small"
+            label={`Strikes ${strikeCount} / ${maxStrikes} · ${remainingStrikes} left`}
+            aria-label="Strikes remaining"
+            sx={{
+              bgcolor: tone.soft,
+              color: tone.text,
+              border: `1px solid ${tone.border}`,
+            }}
+          />
         </Stack>
       }
     >
-      <Stack spacing={2}>
-        <ExamHeader
-          state={state}
-          candidateCode={session.candidateCode}
-          countdownWarning={countdown.warning}
-        />
-
-        {resumed ? (
-          <Alert severity="info" onClose={() => setResumeDismissed(true)}>
-            Your previous answers were restored. Autosave is on.
-          </Alert>
-        ) : null}
-
-        {countdown.warning ? (
-          <Alert severity="warning">
-            Less than 5 minutes remain. Your answers are saved automatically; submit before the
-            timer reaches zero.
-          </Alert>
-        ) : null}
-
-        {error ? <Alert severity="error">{error}</Alert> : null}
-        {submitting ? <LinearProgress /> : null}
-
-        <ExtensionPanel
-          collectorToken={session.collectorToken}
-          connected={state.extensionConnected}
-          lastSeenAt={state.lastSeenAt}
-        />
-
-        {state.exam.questions.map((question, index) => (
-          <QuestionField
-            key={question.id}
-            question={question}
-            index={index}
-            text={autosave.answers[question.id]?.text ?? ''}
-            disabled={submitting}
-            onChange={(text) => autosave.setAnswer(question.id, text)}
-            onBlur={() => void autosave.flush(question.id)}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', lg: '296px minmax(0, 1fr)' },
+          gap: 2,
+          alignItems: 'start',
+        }}
+      >
+        <Stack spacing={2} sx={{ order: { xs: 2, lg: 1 }, position: { lg: 'sticky' }, top: { lg: 88 } }}>
+          <QuestionNavigator
+            questions={questions}
+            answers={navigatorAnswers}
+            flagged={flagged}
+            activeQuestionId={activeQuestion?.id ?? 0}
+            onJump={setActiveId}
+            onSubmit={() => setConfirmOpen(true)}
+            submitting={submitting}
           />
-        ))}
+          <ExtensionPanel
+            collectorToken={session.collectorToken}
+            connected={state.extensionConnected}
+            lastSeenAt={state.lastSeenAt}
+          />
+        </Stack>
 
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between" flexWrap="wrap">
-            <Box>
-              <AttemptStatusChip status={state.status} />
-              <Typography variant="caption" display="block" color="text.secondary">
-                {unanswered.length === 0
-                  ? 'All questions have an answer.'
-                  : `${unanswered.length} question(s) still have no answer.`}
-              </Typography>
-            </Box>
-            <Button
-              variant="contained"
-              size="large"
-              onClick={() => setConfirmOpen(true)}
-              disabled={submitting}
+        <Stack spacing={2} sx={{ order: { xs: 1, lg: 2 }, minWidth: 0 }}>
+          <ExamHeader
+            state={state}
+            candidateCode={session.candidateCode}
+            countdownWarning={countdown.warning}
+          />
+
+          {resumed ? (
+            <Alert severity="info" onClose={() => setResumeDismissed(true)}>
+              Your previous answers were restored. Autosave is on.
+            </Alert>
+          ) : null}
+
+          {countdown.warning && state.status === 'IN_PROGRESS' ? (
+            <Alert severity="warning">
+              Less than 5 minutes remain. Your answers are saved automatically; submit before the timer
+              reaches zero.
+            </Alert>
+          ) : null}
+
+          {state.status === 'EXPIRED' ? (
+            <Alert severity="warning">
+              The allotted time has ended. Autosave is off; submit now to send the answers already saved.
+            </Alert>
+          ) : null}
+
+          {integrityError ? (
+            <Alert severity="warning" onClose={() => setIntegrityError(null)}>
+              {integrityError}
+            </Alert>
+          ) : null}
+
+          {fullscreenLost && state.status === 'IN_PROGRESS' ? (
+            <Alert
+              severity="warning"
+              action={
+                <Button color="inherit" size="small" startIcon={<FullscreenIcon />} onClick={reenterFullscreen}>
+                  Re-enter
+                </Button>
+              }
             >
-              {submitting ? 'Submitting…' : 'Submit exam'}
-            </Button>
-          </Stack>
-        </Paper>
-      </Stack>
+              Full screen was exited. Returning to full screen keeps this attempt in the expected
+              conditions.
+            </Alert>
+          ) : null}
+
+          {autosaveStopped ? (
+            <Alert severity="error" onClose={() => setAutosaveStopped(null)}>
+              {autosaveStopped}
+            </Alert>
+          ) : null}
+
+          {error ? <Alert severity="error">{error}</Alert> : null}
+          {submitting ? <LinearProgress /> : null}
+
+          {activeQuestion ? (
+            <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 } }}>
+              <Stack spacing={2}>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  flexWrap="wrap"
+                  useFlexGap
+                  justifyContent="space-between"
+                >
+                  <Box>
+                    <Typography variant="overline" color="text.secondary">
+                      Question {activeQuestion.orderIndex} of {questions.length}
+                    </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Chip size="small" variant="outlined" label={humanize(activeQuestion.type)} />
+                      <Chip size="small" variant="outlined" label={`${activeQuestion.points} pts`} />
+                    </Stack>
+                  </Box>
+                  <Button
+                    size="small"
+                    color={flagged.has(activeQuestion.id) ? 'warning' : 'inherit'}
+                    startIcon={flagged.has(activeQuestion.id) ? <FlagIcon /> : <FlagOutlinedIcon />}
+                    onClick={toggleFlag}
+                    aria-pressed={flagged.has(activeQuestion.id)}
+                  >
+                    {flagged.has(activeQuestion.id) ? 'Flagged for review' : 'Flag for review'}
+                  </Button>
+                </Stack>
+
+                <Typography variant="h6" component="h2" sx={{ lineHeight: 1.45 }}>
+                  {activeQuestion.prompt}
+                </Typography>
+
+                <QuestionRenderer
+                  question={activeQuestion}
+                  value={currentValue}
+                  disabled={submitting || state.status === 'EXPIRED'}
+                  onChange={(value) =>
+                    autosave.setAnswer(activeQuestion.id, value.text, value.selectedOptions)
+                  }
+                />
+
+                <Divider />
+                <Stack direction="row" spacing={1} justifyContent="space-between">
+                  <Button
+                    startIcon={<NavigateBeforeIcon />}
+                    onClick={() => goTo(-1)}
+                    disabled={activeIndex === 0}
+                  >
+                    Previous
+                  </Button>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <AttemptStatusChip status={state.status} />
+                    <Button
+                      endIcon={<NavigateNextIcon />}
+                      onClick={() => goTo(1)}
+                      disabled={activeIndex >= questions.length - 1}
+                    >
+                      Next
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Stack>
+            </Paper>
+          ) : (
+            <Alert severity="info">This exam has no questions yet.</Alert>
+          )}
+
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Stack
+              direction="row"
+              spacing={2}
+              alignItems="center"
+              justifyContent="space-between"
+              flexWrap="wrap"
+            >
+              <Box>
+                <Typography variant="subtitle2">
+                  {unanswered.length === 0
+                    ? 'All questions have an answer.'
+                    : `${unanswered.length} question(s) still have no answer.`}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {formatDurationMinutes(state.exam.durationMinutes)} allowed · answers autosave
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => setConfirmOpen(true)}
+                disabled={submitting}
+              >
+                {submitting ? 'Submitting…' : 'Submit exam'}
+              </Button>
+            </Stack>
+          </Paper>
+        </Stack>
+      </Box>
+
+      <IntegrityWarningDialog
+        open={warning !== null}
+        strikeCount={warning ?? strikeCount}
+        maxStrikes={maxStrikes}
+        onResume={() => {
+          setWarning(null);
+          void autosave
+            .flushAll()
+            .then(() => {
+              showToast('Resumed. Your answers are saved.', { severity: 'success', duration: 3500 });
+            })
+            .catch(() => {
+              showToast('Resumed, but some answers are still not saved. Reconnect and retry.', {
+                severity: 'error',
+              });
+            });
+        }}
+      />
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Submit exam?</DialogTitle>
@@ -275,6 +562,8 @@ export function AttemptEditor({
           </Stack>
         </DialogContent>
       </Dialog>
+
+      <UnsavedChangesGuard when={autosave.hasUnsavedChanges && !submitting && !terminated} />
     </StudentShell>
   );
 }

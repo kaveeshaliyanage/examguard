@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -28,12 +29,35 @@ public class Attempt {
     @JoinColumn(name = "candidate_id", nullable = false)
     private Candidate candidate;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "student_user_id")
+    private User studentUser;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private AttemptStatus status = AttemptStatus.IN_PROGRESS;
 
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
+
+    /** Set once the supervised pre-exam window is confirmed; the exam clock starts here. */
+    @Column(name = "active_started_at")
+    private Instant activeStartedAt;
+
+    @Column(name = "preflight_completed_at")
+    private Instant preflightCompletedAt;
+
+    @Column(name = "preflight_json", columnDefinition = "text")
+    private String preflightJson;
+
+    @Column(name = "profile_photo", columnDefinition = "text")
+    private String profilePhoto;
+
+    @Column(name = "photo_taken_at")
+    private Instant photoTakenAt;
+
+    @Column(name = "auto_submitted", nullable = false)
+    private boolean autoSubmitted;
 
     @Column(name = "submitted_at")
     private Instant submittedAt;
@@ -46,6 +70,30 @@ public class Attempt {
 
     @Column(name = "late_submission", nullable = false)
     private boolean lateSubmission;
+
+    @Column(name = "strike_count", nullable = false)
+    private Integer strikeCount = 0;
+
+    @Column(name = "max_strikes", nullable = false)
+    private Integer maxStrikes;
+
+    @Column(name = "terminated_at")
+    private Instant terminatedAt;
+
+    @Column(name = "termination_reason", length = 32)
+    private String terminationReason;
+
+    @Column(name = "score_points", precision = 8, scale = 2)
+    private BigDecimal scorePoints;
+
+    @Column(name = "max_points", precision = 8, scale = 2)
+    private BigDecimal maxPoints;
+
+    @Column(name = "graded_at")
+    private Instant gradedAt;
+
+    @Column(name = "released_at")
+    private Instant releasedAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -60,6 +108,12 @@ public class Attempt {
         }
         if (status == null) {
             status = AttemptStatus.IN_PROGRESS;
+        }
+        if (strikeCount == null) {
+            strikeCount = 0;
+        }
+        if (maxStrikes == null) {
+            maxStrikes = exam != null && exam.getMaxStrikes() != null ? exam.getMaxStrikes() : 3;
         }
     }
 }

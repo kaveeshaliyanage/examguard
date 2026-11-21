@@ -14,6 +14,7 @@ import com.examguard.repo.ExamPermissionRepository;
 import com.examguard.repo.ExamRepository;
 import com.examguard.repo.QuestionRepository;
 import com.examguard.repo.ResourceRuleRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -22,6 +23,8 @@ import java.util.List;
 @Component
 class DemoExamSeeder {
 
+    static final String EXAM_CODE = "DEMO-101";
+
     private static final int QUESTION_MAX_WORDS = 250;
 
     private final ExamRepository examRepository;
@@ -29,23 +32,26 @@ class DemoExamSeeder {
     private final QuestionRepository questionRepository;
     private final ResourceRuleRepository ruleRepository;
     private final CandidateRepository candidateRepository;
+    private final PasswordEncoder passwordEncoder;
 
     DemoExamSeeder(
             ExamRepository examRepository,
             ExamPermissionRepository permissionRepository,
             QuestionRepository questionRepository,
             ResourceRuleRepository ruleRepository,
-            CandidateRepository candidateRepository) {
+            CandidateRepository candidateRepository,
+            PasswordEncoder passwordEncoder) {
         this.examRepository = examRepository;
         this.permissionRepository = permissionRepository;
         this.questionRepository = questionRepository;
         this.ruleRepository = ruleRepository;
         this.candidateRepository = candidateRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     SeededExam seed(User lecturer, User reviewer) {
         Exam exam = new Exam();
-        exam.setCode("DEMO-101");
+        exam.setCode(EXAM_CODE);
         exam.setTitle("Demo Examination: Systems and Integrity");
         exam.setDescription("""
                 A four-question short-answer demonstration exam. The seeded attempts contain scripted
@@ -55,6 +61,7 @@ class DemoExamSeeder {
         exam.setStatus(ExamStatus.OPEN);
         exam.setAllowExtension(true);
         exam.setCreatedBy(lecturer);
+        DemoAccess.protect(exam, passwordEncoder);
         exam = examRepository.save(exam);
 
         permissionRepository.save(permission(exam, lecturer, PermissionLevel.OWNER));

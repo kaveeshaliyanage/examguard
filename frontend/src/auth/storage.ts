@@ -1,5 +1,5 @@
 import { isRecord, isString } from '../api/client';
-import type { User } from '../api/types';
+import type { StudentUser, User } from '../api/types';
 
 const STAFF_KEY = 'examguard.staff';
 
@@ -64,24 +64,54 @@ export function readAttemptSession(attemptId: number): AttemptSession | null {
   if (!raw) {
     return null;
   }
+  const session = parseAttemptSession(raw, attemptId);
+  if (session) {
+    return session;
+  }
+  sessionStorage.removeItem(attemptStorageKey(attemptId));
+  return null;
+}
+
+function parseAttemptSession(raw: string, attemptId?: number): AttemptSession | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (isRecord(parsed)) {
       const { sessionToken, collectorToken, candidateCode, examCode } = parsed;
       if (
-        parsed.attemptId === attemptId &&
+        typeof parsed.attemptId === 'number' &&
+        (attemptId === undefined || parsed.attemptId === attemptId) &&
         isString(sessionToken) &&
         isString(collectorToken) &&
         isString(candidateCode) &&
         isString(examCode)
       ) {
-        return { attemptId, sessionToken, collectorToken, candidateCode, examCode };
+        return { attemptId: parsed.attemptId, sessionToken, collectorToken, candidateCode, examCode };
       }
     }
   } catch {
-    // Fall through to clearing the stale value.
+    // A corrupt value is treated as absent.
   }
-  sessionStorage.removeItem(attemptStorageKey(attemptId));
+  return null;
+}
+
+/** Resume proof for the join form, which knows the codes but not the attempt id. */
+export function findAttemptSession(examCode: string, candidateCode: string): AttemptSession | null {
+  const targetExam = examCode.trim().toLowerCase();
+  const targetCandidate = candidateCode.trim().toLowerCase();
+  for (let index = 0; index < sessionStorage.length; index += 1) {
+    const key = sessionStorage.key(index);
+    if (!key || !key.startsWith('examguard.attempt.')) {
+      continue;
+    }
+    const session = parseAttemptSession(sessionStorage.getItem(key) ?? '');
+    if (
+      session &&
+      session.examCode.trim().toLowerCase() === targetExam &&
+      session.candidateCode.trim().toLowerCase() === targetCandidate
+    ) {
+      return session;
+    }
+  }
   return null;
 }
 
@@ -135,4 +165,45 @@ export function readAttemptReceipt(attemptId: number): AttemptReceipt | null {
     // A corrupt receipt is ignored.
   }
   return null;
+}
+
+const STUDENT_KEY = 'examguard.student';
+
+export interface StudentSession {
+  token: string;
+  user: StudentUser;
+}
+
+function isStudentUser(value: unknown): value is StudentUser {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'number' &&
+    isString(value.email) &&
+    isString(value.displayName)
+  );
+}
+
+export function readStudentSession(): StudentSession | null {
+  const raw = sessionStorage.getItem(STUDENT_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isRecord(parsed) && isString(parsed.token) && isStudentUser(parsed.user)) {
+      return { token: parsed.token, user: parsed.user };
+    }
+  } catch {
+    // A corrupt value is treated as signed out.
+  }
+  sessionStorage.removeItem(STUDENT_KEY);
+  return null;
+}
+
+export function writeStudentSession(session: StudentSession): void {
+  sessionStorage.setItem(STUDENT_KEY, JSON.stringify(session));
+}
+
+export function clearStudentSession(): void {
+  sessionStorage.removeItem(STUDENT_KEY);
 }

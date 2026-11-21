@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../api/client';
 import type { SaveAnswerResponse } from '../../api/types';
 import { useAutosave } from './useAutosave';
 
@@ -74,6 +75,50 @@ describe('useAutosave', () => {
     });
     expect(saveAnswerMock).toHaveBeenCalledTimes(1);
     expect(result.current.answers[101]?.status).toBe('saved');
+  });
+
+  it('stops retrying permanently when the server returns 409', async () => {
+    saveAnswerMock.mockRejectedValue(
+      new ApiError(409, 'This attempt is closed', '/attempts/7/answers/101'),
+    );
+    const { result } = renderHook(() =>
+      useAutosave({ attemptId: 7, token: 'token', initialAnswers }),
+    );
+
+    act(() => result.current.setAnswer(101, 'text that cannot be saved'));
+    await advance(800);
+    expect(saveAnswerMock).toHaveBeenCalledTimes(1);
+    expect(result.current.answers[101]?.status).toBe('error');
+    expect(result.current.halted).toBe(true);
+
+    // Neither the exponential backoff nor a debounce may fire again.
+    await advance(120_000);
+    expect(saveAnswerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushAll rejects when an answer could not be saved', async () => {
+    saveAnswerMock.mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() =>
+      useAutosave({ attemptId: 7, token: 'token', initialAnswers }),
+    );
+
+    act(() => result.current.setAnswer(101, 'text that must not be lost'));
+    await expect(result.current.flushAll()).rejects.toThrow('could not be saved');
+    expect(result.current.answers[101]?.text).toBe('text that must not be lost');
+    expect(result.current.hasUnsavedChanges).toBe(true);
+  });
+
+  it('flushAll resolves once every answer is on the server', async () => {
+    saveAnswerMock.mockResolvedValue(saved(1));
+    const { result } = renderHook(() =>
+      useAutosave({ attemptId: 7, token: 'token', initialAnswers }),
+    );
+
+    act(() => result.current.setAnswer(101, 'saved text'));
+    await act(async () => {
+      await result.current.flushAll();
+    });
+    expect(result.current.hasUnsavedChanges).toBe(false);
   });
 
   it('keeps saving after the StrictMode development remount', async () => {

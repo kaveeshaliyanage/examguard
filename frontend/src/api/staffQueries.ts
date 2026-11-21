@@ -1,19 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { isArrayOf, isExamList, isFindingDetail, isRecord, request } from './client';
+import { API_BASE, ApiError, isArrayOf, isExamList, isFindingDetail, isRecord, request } from './client';
 import type {
   AnalysisRun,
+  AttemptPreflight,
   AuditEntry,
   CreateExamInput,
+  CreateQuestionInput,
   DecisionOutcome,
   DecisionView,
   ExamDetail,
+  ExamPinResult,
+  ExamQuestion,
   ExamStatus,
   ExamSummary,
   FindingDetail,
+  FindingOverviewRow,
+  FindingStatus,
   FindingSummary,
+  FindingType,
   AttemptSummary,
   PermissionLevel,
   PermissionView,
+  PriorityBand,
+  RosterEntry,
+  UpdateExamInput,
 } from './types';
 import { readStaffSession } from '../auth/storage';
 
@@ -51,6 +61,33 @@ export function useExamAttempts(examId: number | undefined) {
       staffRequest<AttemptSummary[]>(`/exams/${examId}/attempts`, {
         validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.attemptId === 'number'),
       }),
+    // Attempts change while the exam runs; keep the roster view reasonably fresh.
+    refetchInterval: 30_000,
+  });
+}
+
+export function useAttemptPreflight(examId: number, attemptId: number | null) {
+  return useQuery({
+    queryKey: ['exam', examId, 'attempt', attemptId, 'preflight'],
+    enabled: attemptId !== null,
+    queryFn: () =>
+      staffRequest<AttemptPreflight>(`/exams/${examId}/attempts/${attemptId}/preflight`, {
+        validate: (value) => isRecord(value) && typeof value.completedAt === 'string',
+      }),
+  });
+}
+
+export function useIssueExamPin(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      staffRequest<ExamPinResult>(`/exams/${examId}/pin`, {
+        method: 'POST',
+        validate: (value) => isRecord(value) && typeof value.pin === 'string',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
   });
 }
 
@@ -74,6 +111,70 @@ export function useExamFindings(
         validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.id === 'number'),
       }),
   });
+}
+
+/** Cross-exam review queue: admins see everything, lecturers only exams they can view. */
+export function useOverviewFindings(filters: {
+  examId?: number;
+  type?: FindingType;
+  status?: FindingStatus;
+  band?: PriorityBand;
+}) {
+  const params = new URLSearchParams();
+  if (filters.examId) {
+    params.set('examId', String(filters.examId));
+  }
+  if (filters.type) {
+    params.set('type', filters.type);
+  }
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+  if (filters.band) {
+    params.set('band', filters.band);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return useQuery({
+    queryKey: [
+      'findings',
+      'overview',
+      filters.examId ?? 'ALL',
+      filters.type ?? 'ALL',
+      filters.status ?? 'ALL',
+      filters.band ?? 'ALL',
+    ],
+    queryFn: () =>
+      staffRequest<FindingOverviewRow[]>(`/findings${suffix}`, {
+        validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.id === 'number'),
+      }),
+  });
+}
+
+export type ExamReportFormat = 'pdf' | 'csv';
+
+async function fetchReport(path: string, label: string): Promise<Blob> {
+  const token = staffToken();
+  if (!token) {
+    throw new ApiError(401, 'Sign in again to download the report.', path);
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new ApiError(0, 'Network unavailable. The report could not be downloaded.', path, 'network');
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `${label} could not be downloaded.`, path);
+  }
+  return response.blob();
+}
+
+export function downloadExamReport(examId: number, format: ExamReportFormat): Promise<Blob> {
+  return fetchReport(`/reports/exams/${examId}/${format}`, 'The exam report');
+}
+
+export function downloadAdminOverviewPdf(): Promise<Blob> {
+  return fetchReport('/reports/admin/overview/pdf', 'The administration report');
 }
 
 export function useFinding(findingId: number | undefined) {
@@ -137,6 +238,60 @@ export function useUpdateStatus(examId: number) {
   });
 }
 
+export function useUpdateExam(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateExamInput) =>
+      staffRequest<ExamDetail>(`/exams/${examId}`, {
+        method: 'PATCH',
+        body: input,
+        validate: (value) => isRecord(value) && typeof value.id === 'number',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+      void queryClient.invalidateQueries({ queryKey: ['exams'] });
+    },
+  });
+}
+
+export function useRoster(examId: number | undefined) {
+  return useQuery({
+    queryKey: ['exam', examId, 'roster'],
+    enabled: Number.isFinite(examId),
+    queryFn: () =>
+      staffRequest<RosterEntry[]>(`/exams/${examId}/roster`, {
+        validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.id === 'number'),
+      }),
+  });
+}
+
+export function useAddRosterEntry(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) =>
+      staffRequest<RosterEntry>(`/exams/${examId}/roster`, {
+        method: 'POST',
+        body: { email },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId, 'roster'] });
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
+export function useRemoveRosterEntry(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (entryId: number) =>
+      staffRequest<void>(`/exams/${examId}/roster/${entryId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId, 'roster'] });
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
 export function useAddPermission(examId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -188,6 +343,60 @@ export function useDecide(findingId: number) {
       void queryClient.invalidateQueries({ queryKey: ['finding', findingId] });
       void queryClient.invalidateQueries({ queryKey: ['findings'] });
       void queryClient.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+}
+
+export function useCreateQuestion(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateQuestionInput) =>
+      staffRequest<ExamQuestion>(`/exams/${examId}/questions`, {
+        method: 'POST',
+        body: input,
+        validate: (value) => isRecord(value) && typeof value.id === 'number',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
+export function useUpdateQuestion(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { questionId: number; payload: CreateQuestionInput }) =>
+      staffRequest<ExamQuestion>(`/exams/${examId}/questions/${input.questionId}`, {
+        method: 'PUT',
+        body: input.payload,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
+export function useDeleteQuestion(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (questionId: number) =>
+      staffRequest<void>(`/exams/${examId}/questions/${questionId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
+  });
+}
+
+export function useReorderQuestions(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (questionIds: number[]) =>
+      staffRequest<ExamQuestion[]>(`/exams/${examId}/questions/reorder`, {
+        method: 'PUT',
+        body: { questionIds },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
     },
   });
 }

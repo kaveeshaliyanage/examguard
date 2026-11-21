@@ -2,9 +2,13 @@ package com.examguard.exam;
 
 import com.examguard.domain.AttemptStatus;
 import com.examguard.domain.ExamStatus;
+import com.examguard.domain.GradingMode;
 import com.examguard.domain.PermissionLevel;
+import com.examguard.domain.QuestionType;
 import com.examguard.domain.ResourceCategory;
-import com.examguard.dto.CommonDtos.ExamQuestionView;
+import com.examguard.exam.QuestionPayloads.AnswerKey;
+import com.examguard.exam.QuestionPayloads.Content;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -14,6 +18,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -22,9 +27,15 @@ public final class ExamDtos {
     private ExamDtos() {
     }
 
-    public record CreateQuestion(
+    public record QuestionPayload(
             @NotBlank @Size(max = 4000) String prompt,
-            @NotNull @Min(1) @Max(5000) Integer maxWords) {
+            QuestionType type,
+            BigDecimal points,
+            GradingMode gradingMode,
+            @Min(0) @Max(5000) Integer maxWords,
+            @Valid Content content,
+            @Valid AnswerKey answerKey,
+            @Size(max = 8000) String explanation) {
     }
 
     public record CreateRule(
@@ -39,8 +50,45 @@ public final class ExamDtos {
             @Size(max = 4000) String description,
             @NotNull @Min(5) @Max(600) Integer durationMinutes,
             Boolean allowExtension,
-            @NotEmpty @Size(max = 100) List<@Valid CreateQuestion> questions,
+            @Min(1) @Max(10) Integer maxStrikes,
+            @Size(max = 8000) String instructions,
+            Instant opensAt,
+            Instant closesAt,
+            Boolean requiresPin,
+            Boolean requiresPreflight,
+            @NotEmpty @Size(max = 100) List<@Valid QuestionPayload> questions,
             @Size(max = 100) List<@Valid CreateRule> resourceRules) {
+    }
+
+    /** Full replacement of the editable settings; the exam code is immutable. */
+    public record UpdateExamRequest(
+            @NotBlank @Size(max = 255) String title,
+            @Size(max = 4000) String description,
+            @NotNull @Min(5) @Max(600) Integer durationMinutes,
+            Boolean allowExtension,
+            @NotNull @Min(1) @Max(10) Integer maxStrikes,
+            @Size(max = 8000) String instructions,
+            Instant opensAt,
+            Instant closesAt,
+            Boolean requiresPin,
+            Boolean requiresPreflight,
+            @Size(max = 100) List<@Valid CreateRule> resourceRules) {
+    }
+
+    public record StaffQuestionView(
+            Long id,
+            Integer orderIndex,
+            String prompt,
+            QuestionType type,
+            BigDecimal points,
+            GradingMode gradingMode,
+            Integer maxWords,
+            JsonNode content,
+            JsonNode answerKey,
+            String explanation) {
+    }
+
+    public record ReorderRequest(@NotEmpty List<Long> questionIds) {
     }
 
     public record ExamSummary(
@@ -71,15 +119,33 @@ public final class ExamDtos {
             ExamStatus status,
             Integer durationMinutes,
             boolean allowExtension,
+            Integer maxStrikes,
+            String instructions,
+            Instant opensAt,
+            Instant closesAt,
             Instant createdAt,
             long attemptCount,
             long submittedCount,
             long findingCount,
             long openFindingCount,
             Instant lastAnalysisAt,
-            List<ExamQuestionView> questions,
+            long enrollmentCount,
+            long releasedCount,
+            long awaitingReleaseCount,
+            boolean requiresPin,
+            boolean pinConfigured,
+            Instant pinIssuedAt,
+            Instant pinSentAt,
+            boolean requiresPreflight,
+            List<StaffQuestionView> questions,
             List<RuleView> resourceRules,
             List<PermissionView> permissions) {
+    }
+
+    public record RosterEntryView(Long id, String email, Instant createdAt) {
+    }
+
+    public record RosterEntryRequest(@NotBlank @Email @Size(max = 255) String email) {
     }
 
     public record StatusRequest(@NotNull ExamStatus status) {
@@ -96,12 +162,27 @@ public final class ExamDtos {
             String candidateCode,
             AttemptStatus status,
             Instant startedAt,
+            Instant activeStartedAt,
             Instant submittedAt,
             Instant lastSeenAt,
+            Instant preflightCompletedAt,
+            boolean autoSubmitted,
+            boolean hasPhoto,
             long answerCount,
             long eventCount,
             double coveragePercent,
             boolean coverageWarning,
             boolean lateSubmission) {
+    }
+
+    public record ExamPinView(
+            String pin,
+            int recipients,
+            int emailed,
+            List<String> failedRecipients,
+            Instant issuedAt,
+            Instant sentAt,
+            boolean requiresPin,
+            boolean mailConfigured) {
     }
 }

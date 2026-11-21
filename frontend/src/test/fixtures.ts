@@ -1,4 +1,11 @@
-import type { FindingDetail, JoinResponse, User } from '../api/types';
+import type {
+  AttemptReport,
+  AttemptState,
+  FindingDetail,
+  JoinResponse,
+  StudentAttemptSummary,
+  User,
+} from '../api/types';
 
 export const staffUser: User = {
   id: 2,
@@ -13,6 +20,10 @@ export const joinResponse: JoinResponse = {
   collectorToken: 'collector-token',
   status: 'IN_PROGRESS',
   startedAt: '2026-11-01T09:00:00Z',
+  activeStartedAt: '2026-11-01T09:00:00Z',
+  preflightCompletedAt: '2026-11-01T09:00:00Z',
+  requiresPreflight: false,
+  autoSubmitted: false,
   submittedAt: null,
   serverNow: '2026-11-01T09:10:00Z',
   extensionConnected: false,
@@ -21,7 +32,19 @@ export const joinResponse: JoinResponse = {
     code: 'DEMO-101',
     title: 'Demo Examination',
     durationMinutes: 60,
-    questions: [{ id: 101, orderIndex: 1, prompt: 'Explain the concept.', maxWords: 120 }],
+    instructions: 'Answer every question in your own words.',
+    maxStrikes: 3,
+    questions: [
+      {
+        id: 101,
+        orderIndex: 1,
+        prompt: 'Explain the concept.',
+        type: 'ESSAY',
+        points: 10,
+        maxWords: 120,
+        content: {},
+      },
+    ],
   },
   answers: [{ questionId: 101, text: '', revisionNo: 0, savedAt: null }],
 };
@@ -64,7 +87,17 @@ export const pairFinding: FindingDetail = {
   ],
   decisions: [],
   pairContext: {
-    questions: [{ id: 101, orderIndex: 1, prompt: 'Explain the concept.', maxWords: 120 }],
+    questions: [
+      {
+        id: 101,
+        orderIndex: 1,
+        prompt: 'Explain the concept.',
+        type: 'ESSAY',
+        points: 10,
+        maxWords: 120,
+        content: {},
+      },
+    ],
     candidates: [
       {
         candidateCode: 'C001',
@@ -168,3 +201,106 @@ export const incidentFinding: FindingDetail = {
     ],
   },
 };
+
+
+const attemptStart = new Date(Date.now() - 5 * 60_000).toISOString();
+const attemptNow = new Date().toISOString();
+
+export const attemptStateFixture: AttemptState = {
+  attemptId: 1,
+  status: 'IN_PROGRESS',
+  startedAt: attemptStart,
+  activeStartedAt: attemptStart,
+  preflightCompletedAt: attemptStart,
+  requiresPreflight: false,
+  autoSubmitted: false,
+  submittedAt: null,
+  lastSeenAt: attemptNow,
+  serverNow: attemptNow,
+  extensionConnected: true,
+  strikeCount: 0,
+  maxStrikes: 3,
+  terminatedAt: null,
+  terminationReason: null,
+  exam: {
+    id: 1,
+    code: 'DEMO-101',
+    title: 'Demo Examination',
+    durationMinutes: 60,
+    instructions: 'Answer every question in your own words.',
+    maxStrikes: 3,
+    questions: [
+      {
+        id: 101,
+        orderIndex: 1,
+        prompt: 'Explain the concept.',
+        type: 'ESSAY',
+        points: 10,
+        maxWords: 120,
+        content: {},
+      },
+    ],
+  },
+  answers: [{ questionId: 101, text: '', selectedOptions: [], revisionNo: 0, savedAt: null }],
+};
+
+export const attemptReportFixture: AttemptReport = {
+  attemptId: 1,
+  examTitle: 'Demo Examination',
+  candidateCode: 'C001',
+  status: 'SUBMITTED',
+  scorePoints: 7,
+  maxPoints: 10,
+  released: true,
+  questions: [
+    {
+      prompt: 'Explain the concept.',
+      type: 'ESSAY',
+      points: 10,
+      awardedPoints: 7,
+      answerText: 'The concept is explained in my own words.',
+      selectedOptions: [],
+      correctKeys: ['A'],
+      explanation: 'Clear structure; the example could be more specific.',
+    },
+  ],
+  integrity: {
+    strikes: 1,
+    maxStrikes: 3,
+    terminatedAt: null,
+    events: [
+      { signal: 'FOCUS_LOSS', occurredAt: '2026-11-01T09:12:00Z' },
+      { signal: 'FOCUS_RETURN', occurredAt: '2026-11-01T09:12:30Z' },
+    ],
+  },
+  reviewSignals: [
+    { kind: 'OVERLAP', label: 'Moderate phrase overlap with another candidate', band: 'MEDIUM', score: 42 },
+  ],
+};
+
+export const studentAttemptsFixture: StudentAttemptSummary[] = [
+  {
+    attemptId: 1,
+    examCode: 'DEMO-101',
+    examTitle: 'Demo Examination',
+    status: 'IN_PROGRESS',
+    startedAt: attemptStart,
+    submittedAt: null,
+    scorePoints: null,
+    maxPoints: null,
+    released: false,
+    strikes: 1,
+  },
+  {
+    attemptId: 2,
+    examCode: 'DEMO-202',
+    examTitle: 'Algorithms Midterm',
+    status: 'SUBMITTED',
+    startedAt: '2026-10-01T09:00:00Z',
+    submittedAt: '2026-10-01T10:00:00Z',
+    scorePoints: 14,
+    maxPoints: 20,
+    released: true,
+    strikes: 0,
+  },
+];

@@ -1,6 +1,7 @@
 package com.examguard.service;
 
 import com.examguard.config.JwtService;
+import com.examguard.domain.Role;
 import com.examguard.domain.User;
 import com.examguard.dto.AuthDtos.LoginRequest;
 import com.examguard.dto.AuthDtos.LoginResponse;
@@ -38,6 +39,10 @@ public class AuthService {
 
         if (!user.isEnabled() || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+        }
+        if (user.getRole() == Role.STUDENT) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED, "Students sign in at the student portal");
         }
         return new LoginResponse(jwtService.issueStaffToken(user), toView(user));
     }

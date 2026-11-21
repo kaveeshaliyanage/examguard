@@ -1,7 +1,26 @@
 export type Role = 'ADMIN' | 'LECTURER' | 'REVIEWER';
 export type ExamStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ANALYSED';
-export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'EXPIRED';
-export type FindingType = 'CANDIDATE_PAIR' | 'CANDIDATE_INCIDENT';
+export type AttemptStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'TERMINATED' | 'EXPIRED';
+export type QuestionType =
+  | 'SINGLE_CHOICE'
+  | 'MULTI_CHOICE'
+  | 'TRUE_FALSE'
+  | 'SHORT_ANSWER'
+  | 'ESSAY'
+  | 'CODE';
+export type CodeLanguage = 'PYTHON' | 'JAVASCRIPT' | 'JAVA';
+export type GradingMode = 'AUTO' | 'MANUAL';
+export type IntegritySignal =
+  | 'FOCUS_LOSS'
+  | 'FOCUS_RETURN'
+  | 'FULLSCREEN_EXIT'
+  | 'GAZE_AWAY'
+  | 'GAZE_RETURN'
+  | 'CAMERA_LOST'
+  | 'NOISE_HIGH'
+  | 'NETWORK_LOST'
+  | 'NETWORK_RESTORED';
+export type FindingType = 'CANDIDATE_PAIR' | 'CANDIDATE_INCIDENT' | 'CANDIDATE_AUTHORSHIP';
 export type FindingStatus = 'OPEN' | 'CONFIRMED' | 'DISMISSED' | 'NEEDS_INFO' | 'ESCALATED' | 'SUPERSEDED';
 export type PriorityBand = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type DecisionOutcome = 'CONFIRMED' | 'DISMISSED' | 'NEEDS_INFO' | 'ESCALATED';
@@ -14,7 +33,8 @@ export type EvidenceSource =
   | 'TIMING'
   | 'ACTIVITY'
   | 'ANSWER_CHANGE'
-  | 'COVERAGE';
+  | 'COVERAGE'
+  | 'AUTHORSHIP';
 export type EventType =
   | 'NAVIGATION'
   | 'HEARTBEAT'
@@ -41,11 +61,58 @@ export interface ExamRef {
   title: string;
 }
 
+export interface QuestionOption {
+  key: string;
+  text: string;
+}
+
+export interface QuestionContent {
+  options?: QuestionOption[];
+  language?: CodeLanguage;
+  starterCode?: string | null;
+}
+
+export interface CodeTest {
+  name?: string | null;
+  input?: string | null;
+  expectedOutput: string;
+  hidden?: boolean;
+}
+
+export interface CodeTestResult {
+  name: string;
+  passed: boolean;
+  status: string;
+  hidden: boolean;
+  durationMs: number;
+}
+
+export interface CodeGradeDetail {
+  language: CodeLanguage;
+  passed: number;
+  total: number;
+  tests: CodeTestResult[];
+}
+
+export interface AnswerKey {
+  selectedKeys?: string[];
+  acceptedAnswers?: string[];
+  modelAnswer?: string | null;
+  rubric?: string | null;
+  tests?: CodeTest[];
+}
+
 export interface ExamQuestion {
   id: number;
   orderIndex: number;
   prompt: string;
+  type: QuestionType;
+  points: number;
+  gradingMode?: GradingMode;
   maxWords: number;
+  content: QuestionContent;
+  answerKey?: AnswerKey | null;
+  explanation?: string | null;
 }
 
 export interface ExamSummary {
@@ -84,15 +151,47 @@ export interface ExamDetail {
   status: ExamStatus;
   durationMinutes: number;
   allowExtension: boolean;
+  maxStrikes?: number;
+  instructions?: string | null;
+  opensAt: string | null;
+  closesAt: string | null;
   createdAt: string;
   attemptCount: number;
   submittedCount: number;
   findingCount: number;
   openFindingCount: number;
   lastAnalysisAt: string | null;
+  enrollmentCount: number;
+  releasedCount: number;
+  awaitingReleaseCount: number;
+  requiresPin: boolean;
+  pinConfigured: boolean;
+  pinIssuedAt: string | null;
+  pinSentAt: string | null;
+  requiresPreflight: boolean;
   questions: ExamQuestion[];
   resourceRules: RuleView[];
   permissions: PermissionView[];
+}
+
+export interface RosterEntry {
+  id: number;
+  email: string;
+  createdAt: string;
+}
+
+export interface UpdateExamInput {
+  title: string;
+  description: string | null;
+  durationMinutes: number;
+  allowExtension: boolean;
+  maxStrikes: number;
+  instructions: string | null;
+  opensAt: string | null;
+  closesAt: string | null;
+  requiresPin: boolean;
+  requiresPreflight: boolean;
+  resourceRules: CreateRuleInput[];
 }
 
 export interface AttemptSummary {
@@ -100,8 +199,12 @@ export interface AttemptSummary {
   candidateCode: string;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
   submittedAt: string | null;
   lastSeenAt: string | null;
+  preflightCompletedAt: string | null;
+  autoSubmitted: boolean;
+  hasPhoto: boolean;
   answerCount: number;
   eventCount: number;
   coveragePercent: number;
@@ -121,6 +224,21 @@ export interface FindingSummary {
   coverageWarning: boolean;
   evidenceCount: number;
   createdAt: string;
+}
+
+export interface FindingOverviewRow {
+  id: number;
+  type: FindingType;
+  priorityScore: number;
+  priorityBand: PriorityBand;
+  status: FindingStatus;
+  candidateA: string;
+  candidateB: string | null;
+  summary: string;
+  coverageWarning: boolean;
+  evidenceCount: number;
+  createdAt: string;
+  exam: { id: number; code: string; title: string };
 }
 
 export interface AnalysisRun {
@@ -222,6 +340,7 @@ export interface AuditEntry {
 export interface AnswerView {
   questionId: number;
   text: string;
+  selectedOptions?: string[];
   revisionNo: number;
   savedAt: string | null;
 }
@@ -231,6 +350,8 @@ export interface ExamForAttempt {
   code: string;
   title: string;
   durationMinutes: number;
+  instructions: string;
+  maxStrikes: number;
   questions: ExamQuestion[];
 }
 
@@ -240,6 +361,10 @@ export interface JoinResponse {
   collectorToken: string;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
+  preflightCompletedAt: string | null;
+  requiresPreflight: boolean;
+  autoSubmitted: boolean;
   submittedAt: string | null;
   serverNow: string;
   extensionConnected: boolean;
@@ -251,10 +376,18 @@ export interface AttemptState {
   attemptId: number;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
+  preflightCompletedAt: string | null;
+  requiresPreflight: boolean;
+  autoSubmitted: boolean;
   submittedAt: string | null;
   lastSeenAt: string | null;
   serverNow: string;
   extensionConnected: boolean;
+  strikeCount: number;
+  maxStrikes: number;
+  terminatedAt: string | null;
+  terminationReason: string | null;
   exam: ExamForAttempt;
   answers: AnswerView[];
 }
@@ -285,7 +418,12 @@ export interface CoverageView {
 
 export interface CreateQuestionInput {
   prompt: string;
+  type: QuestionType;
+  points: number;
   maxWords: number;
+  content?: QuestionContent;
+  answerKey?: AnswerKey;
+  explanation?: string | null;
 }
 
 export interface CreateRuleInput {
@@ -300,6 +438,290 @@ export interface CreateExamInput {
   description: string | null;
   durationMinutes: number;
   allowExtension: boolean;
+  maxStrikes: number;
+  instructions: string | null;
+  opensAt: string | null;
+  closesAt: string | null;
+  requiresPin?: boolean;
+  requiresPreflight?: boolean;
   questions: CreateQuestionInput[];
   resourceRules: CreateRuleInput[];
+}
+
+export interface PreflightPayload {
+  fullscreen: boolean;
+  connectionOk: boolean;
+  deviceOk: boolean;
+  micOk: boolean;
+  noiseOk: boolean;
+  cameraOk: boolean;
+  faceDetected: boolean;
+  gazeOnScreen: boolean;
+  noiseLevel: string | null;
+  photoDataUrl: string;
+  checks: Record<string, unknown>;
+}
+
+export interface PreflightResult {
+  completedAt: string;
+  activeStartedAt: string;
+  deadlineAt: string;
+  durationMinutes: number;
+  serverNow: string;
+}
+
+export interface AttemptPreflight {
+  completedAt: string;
+  photoTakenAt: string | null;
+  photoDataUrl: string | null;
+  checks: Record<string, unknown> | null;
+}
+
+export interface ExamPinResult {
+  pin: string;
+  recipients: number;
+  emailed: number;
+  failedRecipients: string[];
+  issuedAt: string;
+  sentAt: string | null;
+  requiresPin: boolean;
+  mailConfigured: boolean;
+}
+
+export interface IntegritySignalResponse {
+  strikeCount: number;
+  maxStrikes: number;
+  terminated: boolean;
+  status: AttemptStatus;
+}
+
+export interface StudentUser {
+  id: number;
+  email: string;
+  displayName: string;
+}
+
+export interface StudentLoginResponse {
+  token: string;
+  user: StudentUser;
+}
+
+export interface StudentAttemptSummary {
+  attemptId: number;
+  examCode: string;
+  examTitle: string;
+  status: AttemptStatus;
+  startedAt: string;
+  submittedAt: string | null;
+  scorePoints: number | null;
+  maxPoints: number | null;
+  released: boolean;
+  strikes: number;
+}
+
+export interface ReportQuestion {
+  prompt: string;
+  type: QuestionType;
+  points: number;
+  awardedPoints: number | null;
+  answerText: string;
+  selectedOptions: string[];
+  correctKeys: string[] | null;
+  explanation: string | null;
+  codeLanguage?: CodeLanguage | null;
+  codeDetail?: CodeGradeDetail | null;
+}
+
+export interface ReportIntegrityEvent {
+  signal: IntegritySignal | string;
+  occurredAt: string;
+}
+
+export interface ReportIntegrity {
+  strikes: number;
+  maxStrikes: number;
+  terminatedAt: string | null;
+  events: ReportIntegrityEvent[];
+}
+
+export interface ReviewSignal {
+  kind: string;
+  label: string;
+  band: PriorityBand;
+  score: number;
+}
+
+export interface AttemptReport {
+  attemptId: number;
+  examTitle: string;
+  candidateCode: string;
+  status: AttemptStatus;
+  scorePoints: number;
+  maxPoints: number;
+  released: boolean;
+  questions: ReportQuestion[];
+  integrity: ReportIntegrity;
+  reviewSignals: ReviewSignal[];
+}
+
+export interface StudentStats {
+  totalAttempts: number;
+  submitted: number;
+  terminated: number;
+  released: number;
+  averagePercentage: number | null;
+  strikesThisTerm: number;
+}
+
+export interface UpcomingExam {
+  examId: number;
+  code: string;
+  title: string;
+  opensAt: string | null;
+  closesAt: string | null;
+  openNow: boolean;
+}
+
+export interface StudentDashboardData {
+  profile: StudentUser;
+  stats: StudentStats;
+  upcoming: UpcomingExam[];
+  attempts: StudentAttemptSummary[];
+}
+
+export interface ExamHealthRow {
+  examId: number;
+  code: string;
+  title: string;
+  status: ExamStatus;
+  attempts: number;
+  submitted: number;
+  ungraded: number;
+  openFindings: number;
+  flaggedCandidates: number;
+  awaitingRelease: number;
+  lastAnalysisAt: string | null;
+}
+
+export interface UngradedAttempt {
+  attemptId: number;
+  examId: number;
+  examTitle: string;
+  candidateCode: string;
+  status: AttemptStatus;
+  pendingQuestions: number;
+}
+
+export interface FlaggedCandidate {
+  findingId: number;
+  examId: number;
+  examTitle: string;
+  candidateCode: string;
+  priorityScore: number;
+  band: PriorityBand;
+  type: FindingType;
+}
+
+export interface ScoreBucket {
+  label: string;
+  count: number;
+}
+
+export interface FocusLossPoint {
+  date: string;
+  focusLossSignals: number;
+}
+
+export interface BandCount {
+  band: PriorityBand;
+  count: number;
+}
+
+export interface FunnelStage {
+  stage: string;
+  count: number;
+}
+
+export interface LecturerDashboardData {
+  exams: ExamHealthRow[];
+  ungradedQueue: UngradedAttempt[];
+  flagged: FlaggedCandidate[];
+  distribution: ScoreBucket[];
+  integrityTrend: FocusLossPoint[];
+  bandMix: BandCount[];
+  funnel: FunnelStage[];
+  ungradedTotal: number;
+  flaggedTotal: number;
+  awaitingRelease: number;
+}
+
+export interface AdminCounts {
+  users: number;
+  students: number;
+  lecturers: number;
+  admins: number;
+  exams: number;
+  attempts: number;
+  findings: number;
+}
+
+export interface AdminRunRow {
+  id: number;
+  examId: number;
+  examTitle: string;
+  status: AnalysisStatus;
+  modelVersion: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface AdminAuditRow {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  examId: number | null;
+  actor: string;
+  createdAt: string;
+}
+
+export interface AdminDashboardData {
+  counts: AdminCounts;
+  aiHealthy: boolean;
+  recentRuns: AdminRunRow[];
+  recentAudit: AdminAuditRow[];
+}
+
+export interface GradingRow {
+  attemptId: number;
+  candidateCode: string;
+  questionId: number;
+  prompt: string;
+  type: QuestionType;
+  points: number;
+  text: string;
+  selectedOptions: string[];
+  revisionNo: number;
+  savedAt: string | null;
+  answerKey: AnswerKey | null;
+  explanation: string | null;
+  awardedPoints: number | null;
+  comment: string | null;
+  detail?: CodeGradeDetail | null;
+}
+
+export interface CodeJudgeSummary {
+  attemptsJudged: number;
+  questionsJudged: number;
+}
+
+export interface GradeResponse {
+  questionId: number;
+  awardedPoints: number;
+  maxPoints: number;
+  gradedAt: string;
+}
+
+export interface ReleaseResponse {
+  releasedAttempts: number;
 }

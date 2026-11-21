@@ -1,6 +1,7 @@
 package com.examguard.attempt;
 
 import com.examguard.attempt.AttemptDtos.AnswerView;
+import com.examguard.attempt.AttemptDtos.AttemptQuestionView;
 import com.examguard.attempt.AttemptDtos.ExamForAttempt;
 import com.examguard.attempt.AttemptDtos.JoinRequest;
 import com.examguard.attempt.AttemptDtos.JoinResponse;
@@ -12,14 +13,18 @@ import com.examguard.domain.Candidate;
 import com.examguard.domain.Exam;
 import com.examguard.domain.ExamStatus;
 import com.examguard.domain.Question;
-import com.examguard.dto.CommonDtos.ExamQuestionView;
+import com.examguard.domain.User;
+import com.examguard.exam.QuestionJson;
 import com.examguard.repo.AnswerRevisionRepository;
 import com.examguard.repo.AttemptRepository;
 import com.examguard.repo.CandidateRepository;
+import com.examguard.repo.ExamEnrollmentRepository;
 import com.examguard.repo.ExamRepository;
 import com.examguard.repo.QuestionRepository;
 import com.examguard.service.AuditService;
+import io.jsonwebtoken.Claims;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -28,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -38,8 +44,13 @@ public class JoinService {
     private final AttemptRepository attemptRepository;
     private final QuestionRepository questionRepository;
     private final AnswerRevisionRepository revisionRepository;
+    private final ExamEnrollmentRepository enrollmentRepository;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final QuestionJson questionJson;
+    private final AnswerJson answerJson;
+    private final PasswordEncoder passwordEncoder;
+    private final PinThrottle pinThrottle;
 
     public JoinService(
             ExamRepository examRepository,
@@ -47,42 +58,89 @@ public class JoinService {
             AttemptRepository attemptRepository,
             QuestionRepository questionRepository,
             AnswerRevisionRepository revisionRepository,
+            ExamEnrollmentRepository enrollmentRepository,
             JwtService jwtService,
-            AuditService auditService) {
+            AuditService auditService,
+            QuestionJson questionJson,
+            AnswerJson answerJson,
+            PasswordEncoder passwordEncoder,
+            PinThrottle pinThrottle) {
         this.examRepository = examRepository;
         this.candidateRepository = candidateRepository;
         this.attemptRepository = attemptRepository;
         this.questionRepository = questionRepository;
         this.revisionRepository = revisionRepository;
+        this.enrollmentRepository = enrollmentRepository;
         this.jwtService = jwtService;
         this.auditService = auditService;
+        this.questionJson = questionJson;
+        this.answerJson = answerJson;
+        this.passwordEncoder = passwordEncoder;
+        this.pinThrottle = pinThrottle;
     }
 
     @Transactional
     public JoinResponse join(JoinRequest request) {
+        return join(request, null, "public");
+    }
+
+    @Transactional
+    public JoinResponse join(JoinRequest request, User student, String client) {
         Exam exam = examRepository.findByCodeIgnoreCase(request.examCode().trim())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam code not recognised"));
         if (exam.getStatus() != ExamStatus.OPEN) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This exam is not open for participants");
         }
 
-        Candidate candidate = resolveCandidate(exam, request.candidateCode());
-        Attempt attempt = resolveAttempt(exam, candidate);
+        String candidateCode = request.candidateCode().trim();
+        if (candidateCode.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate code is required");
+        }
+        Candidate candidate = candidateRepository
+                .findByExamIdAndCodeIgnoreCase(exam.getId(), candidateCode).orElse(null);
+        Attempt attempt = candidate == null ? null
+                : attemptRepository.findByExamIdAndCandidateId(exam.getId(), candidate.getId()).orElse(null);
+
+        // Window and roster gate opening a new attempt only. An existing attempt can be
+        // resumed so no answers are stranded, but it needs proof that the caller owns it.
+        if (attempt == null) {
+            enforceJoinWindow(exam);
+            verifyPin(exam, request.accessPin(), client);
+            enforceRoster(exam, student);
+        } else {
+            requireResumeProof(request.resumeToken(), attempt, student);
+        }
+        if (candidate == null) {
+            candidate = createCandidate(exam, candidateCode);
+        }
+        if (attempt == null) {
+            attempt = createAttempt(exam, candidate);
+        }
         if (attempt.getStatus() == AttemptStatus.SUBMITTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt has already been submitted");
         }
         if (attempt.getStatus() == AttemptStatus.EXPIRED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt has expired");
         }
+        if (attempt.getStatus() == AttemptStatus.TERMINATED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt has been terminated");
+        }
+        if (student != null) {
+            linkStudent(attempt, student);
+        }
         attempt.setLastSeenAt(Instant.now());
         attemptRepository.save(attempt);
-
+        String attemptToken = jwtService.issueAttemptToken(attempt);
         return new JoinResponse(
                 attempt.getId(),
-                jwtService.issueAttemptToken(attempt),
-                jwtService.issueAttemptToken(attempt),
+                attemptToken,
+                attemptToken,
                 attempt.getStatus().name(),
                 attempt.getStartedAt(),
+                attempt.getActiveStartedAt(),
+                attempt.getPreflightCompletedAt(),
+                exam.isRequiresPreflight(),
+                attempt.isAutoSubmitted(),
                 attempt.getSubmittedAt(),
                 Instant.now(),
                 attempt.isExtensionConnected(),
@@ -90,13 +148,74 @@ public class JoinService {
                 latestAnswers(attempt));
     }
 
-    private Candidate resolveCandidate(Exam exam, String rawCode) {
-        String code = rawCode.trim();
-        if (code.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate code is required");
+    /**
+     * The PIN is checked only when a new attempt is opened. Resuming an existing attempt instead
+     * requires its token or owning account, so a rotated PIN never strands saved answers.
+     */
+    private void verifyPin(Exam exam, String supplied, String client) {
+        if (!exam.isRequiresPin() && exam.getAccessPinHash() == null) {
+            return;
         }
-        return candidateRepository.findByExamIdAndCodeIgnoreCase(exam.getId(), code)
-                .orElseGet(() -> createCandidate(exam, code));
+        String key = exam.getCode().toLowerCase(Locale.ROOT) + "|" + client;
+        if (exam.getAccessPinHash() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The exam PIN has not been issued yet. Contact your lecturer.");
+        }
+        pinThrottle.check(key);
+        String candidate = supplied == null ? "" : supplied.trim();
+        if (candidate.isEmpty() || !passwordEncoder.matches(candidate, exam.getAccessPinHash())) {
+            pinThrottle.recordFailure(key);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The exam PIN is incorrect or has been replaced by a newer PIN");
+        }
+        pinThrottle.clear(key);
+    }
+
+    /**
+     * A candidate code is not a secret: it is printed on the paper. Resuming therefore needs the
+     * token issued at join, or an account that already owns the attempt.
+     */
+    private void requireResumeProof(String resumeToken, Attempt attempt, User student) {
+        User owner = attempt.getStudentUser();
+        if (student != null && owner != null && !owner.getId().equals(student.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "This attempt belongs to another student account");
+        }
+        if (resumeToken == null || resumeToken.isBlank()) {
+            if (student != null) {
+                return;
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "A resume token is required to continue this attempt");
+        }
+        Claims claims;
+        try {
+            claims = jwtService.parse(resumeToken.trim());
+        } catch (RuntimeException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "The resume token is not valid");
+        }
+        Object examId = claims.get("examId");
+        boolean matches = String.valueOf(attempt.getId()).equals(claims.getSubject())
+                && examId instanceof Number number
+                && number.longValue() == attempt.getExam().getId();
+        if (!matches) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The resume token does not match this attempt");
+        }
+    }
+
+    private void linkStudent(Attempt attempt, User student) {
+        User current = attempt.getStudentUser();
+        if (current != null) {
+            if (!current.getId().equals(student.getId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "This attempt belongs to another student account");
+            }
+            return;
+        }
+        attempt.setStudentUser(student);
+        auditService.record(student, attempt.getExam().getId(), "ATTEMPT_LINKED", "ATTEMPT", attempt.getId(),
+                Map.of("userId", student.getId(), "candidateCode", attempt.getCandidate().getCode()));
     }
 
     private Candidate createCandidate(Exam exam, String code) {
@@ -109,9 +228,30 @@ public class JoinService {
         return candidate;
     }
 
-    private Attempt resolveAttempt(Exam exam, Candidate candidate) {
-        return attemptRepository.findByExamIdAndCandidateId(exam.getId(), candidate.getId())
-                .orElseGet(() -> createAttempt(exam, candidate));
+    private void enforceJoinWindow(Exam exam) {
+        Instant now = Instant.now();
+        if (exam.getOpensAt() != null && now.isBefore(exam.getOpensAt())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This exam opens at " + exam.getOpensAt());
+        }
+        if (exam.getClosesAt() != null && now.isAfter(exam.getClosesAt())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This exam closed at " + exam.getClosesAt());
+        }
+    }
+
+    private void enforceRoster(Exam exam, User student) {
+        if (enrollmentRepository.countByExamId(exam.getId()) == 0) {
+            return;
+        }
+        if (student == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "This exam has a participant list. Sign in with your enrolled email to join.");
+        }
+        if (!enrollmentRepository.existsByExamIdAndEmailIgnoreCase(exam.getId(), student.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Your account is not on the participant list for this exam");
+        }
     }
 
     private Attempt createAttempt(Exam exam, Candidate candidate) {
@@ -119,19 +259,31 @@ public class JoinService {
         attempt.setExam(exam);
         attempt.setCandidate(candidate);
         attempt.setStatus(AttemptStatus.IN_PROGRESS);
-        attempt.setStartedAt(Instant.now());
-        attempt.setLastSeenAt(Instant.now());
+        Instant now = Instant.now();
+        attempt.setStartedAt(now);
+        attempt.setLastSeenAt(now);
+        attempt.setMaxStrikes(exam.getMaxStrikes());
+        if (!exam.isRequiresPreflight()) {
+            attempt.setActiveStartedAt(now);
+            attempt.setPreflightCompletedAt(now);
+        }
         return attemptRepository.save(attempt);
     }
 
     ExamForAttempt examForAttempt(Exam exam) {
-        List<ExamQuestionView> questions = questionRepository
+        List<AttemptQuestionView> questions = questionRepository
                 .findByExamIdOrderByOrderIndexAsc(exam.getId()).stream()
-                .map(question -> new ExamQuestionView(
-                        question.getId(), question.getOrderIndex(), question.getPrompt(), question.getMaxWords()))
+                .map(question -> new AttemptQuestionView(
+                        question.getId(),
+                        question.getOrderIndex(),
+                        question.getPrompt(),
+                        question.getType(),
+                        question.getPoints(),
+                        question.getMaxWords(),
+                        questionJson.content(question)))
                 .toList();
         return new ExamForAttempt(exam.getId(), exam.getCode(), exam.getTitle(),
-                exam.getDurationMinutes(), questions);
+                exam.getDurationMinutes(), exam.getInstructions(), exam.getMaxStrikes(), questions);
     }
 
     List<AnswerView> latestAnswers(Attempt attempt) {
@@ -139,6 +291,7 @@ public class JoinService {
         for (AnswerRevision revision : revisionRepository
                 .findByAttemptIdOrderByQuestionIdAscRevisionNoAsc(attempt.getId())) {
             AnswerView view = new AnswerView(revision.getQuestion().getId(), revision.getText(),
+                    answerJson.read(revision.getSelectedOptions()),
                     revision.getRevisionNo(), revision.getSavedAt());
             latest.put(revision.getQuestion().getId(), view);
         }
@@ -146,7 +299,7 @@ public class JoinService {
         List<AnswerView> ordered = new ArrayList<>();
         for (Question question : questions) {
             AnswerView view = latest.get(question.getId());
-            ordered.add(view != null ? view : new AnswerView(question.getId(), "", 0, null));
+            ordered.add(view != null ? view : new AnswerView(question.getId(), "", List.of(), 0, null));
         }
         return ordered;
     }

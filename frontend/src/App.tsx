@@ -5,6 +5,9 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './AuthProvider';
 import { ApiError } from './api/client';
 import { AppRoutes } from './router';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './components/ToastProvider';
+import { StudentAuthProvider } from './features/student/StudentAuthProvider';
 import { theme } from './theme';
 
 const queryClient = new QueryClient({
@@ -27,11 +30,17 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <BrowserRouter>
-          <AuthProvider>
-            <AppRoutes />
-          </AuthProvider>
-        </BrowserRouter>
+        <ToastProvider>
+          <ErrorBoundary>
+            <BrowserRouter>
+              <AuthProvider>
+                <StudentAuthProvider>
+                  <AppRoutes />
+                </StudentAuthProvider>
+              </AuthProvider>
+            </BrowserRouter>
+          </ErrorBoundary>
+        </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

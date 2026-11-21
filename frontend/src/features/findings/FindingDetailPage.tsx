@@ -22,6 +22,7 @@ import { PairContextView } from './PairContextView';
 const typeLabel: Record<FindingType, string> = {
   CANDIDATE_PAIR: 'Candidate pair',
   CANDIDATE_INCIDENT: 'Candidate incident',
+  CANDIDATE_AUTHORSHIP: 'Authorship signal',
 };
 
 export function FindingDetailPage() {
@@ -89,6 +90,13 @@ export function FindingDetailPage() {
             </Box>
 
             <CoverageBanner warning={finding.coverageWarning} />
+
+            {finding.type === 'CANDIDATE_AUTHORSHIP' ? (
+              <Alert severity="info" variant="outlined">
+                Stylometry describes how this answer was written. It is a review aid capped at MEDIUM
+                priority: it is not proof that AI was used, and copying is handled by pair findings.
+              </Alert>
+            ) : null}
 
             <Alert severity="info" variant="outlined">
               {finding.summary}

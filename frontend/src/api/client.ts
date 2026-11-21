@@ -1,4 +1,4 @@
-export type TokenScope = 'staff' | 'attempt';
+export type TokenScope = 'staff' | 'attempt' | 'student';
 
 export type ApiErrorKind = 'http' | 'network' | 'shape';
 

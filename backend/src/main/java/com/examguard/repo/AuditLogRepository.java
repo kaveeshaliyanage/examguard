@@ -7,4 +7,6 @@ import java.util.List;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     List<AuditLog> findByExamIdOrderByCreatedAtDesc(Long examId);
+
+    List<AuditLog> findTop20ByOrderByCreatedAtDesc();
 }

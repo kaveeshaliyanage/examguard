@@ -1,7 +1,8 @@
 # Data model
 
-MySQL 8, schema managed by Flyway (`backend/src/main/resources/db/migration/V1__schema.sql`).
-All timestamps are UTC `datetime(6)`. Candidate identity is a code, not a name.
+MySQL 8, schema managed by Flyway (`backend/src/main/resources/db/migration/mysql/`); the
+PostgreSQL mirror lives in `.../postgresql/`. All timestamps are UTC `datetime(6)`. Candidate
+identity is a code, not a name; student accounts are optional and only link attempts to an email.
 
 ## Tables
 
@@ -29,7 +30,22 @@ A candidate is **not** an `app_user`; they only hold an attempt token.
 | created_by | FK app_user |
 | opens_at, closes_at | nullable |
 | allow_extension | boolean |
+| requires_pin | boolean, default false; gates new joins once a PIN is issued |
+| access_pin_hash | BCrypt hash of the 6-digit PIN, nullable; plaintext is never stored |
+| access_pin_issued_at, access_pin_sent_at | issue and last-email timestamps |
+| requires_preflight | boolean, default true; supervised pre-exam window |
 | created_at | |
+
+### `exam_enrollment`
+| Column | Notes |
+| --- | --- |
+| id | PK |
+| exam_id | FK exam |
+| email | trimmed and lower-cased |
+| created_at | |
+| unique | (exam_id, email) |
+
+A non-empty roster limits new joins to these addresses and is the PIN email distribution list.
 
 ### `exam_permission`
 | Column | Notes |
@@ -72,11 +88,22 @@ A candidate is **not** an `app_user`; they only hold an attempt token.
 | --- | --- |
 | id | PK |
 | exam_id, candidate_id | unique pair; one attempt per candidate |
-| status | `IN_PROGRESS`, `SUBMITTED`, `EXPIRED` |
-| started_at, submitted_at, last_seen_at | server timestamps |
+| student_user_id | nullable FK `app_user`; links a resume to the signed-in student account |
+| status | `IN_PROGRESS`, `SUBMITTED`, `EXPIRED`, `TERMINATED` |
+| started_at | join time; rewritten when the preflight is confirmed |
+| active_started_at | when the exam clock starts; nullable until the preflight is confirmed |
+| preflight_completed_at | nullable; set with `active_started_at` |
+| preflight_json | the 8 check booleans plus client diagnostics |
+| profile_photo | data-URL identity photo, nullable |
+| photo_taken_at | nullable |
+| auto_submitted | true when the deadline sweep stopped the attempt |
+| submitted_at, last_seen_at | server timestamps |
 | extension_connected | set by `EXTENSION_CONNECTED` event |
 | late_submission | boolean |
 | created_at | |
+
+The deadline is `active_started_at + duration_minutes`; the expiry sweep and the save path read the
+same clock. Index `(status, active_started_at)` supports the sweep.
 
 ### `answer_revision`
 Immutable. The current answer is the highest revision number for an attempt/question.

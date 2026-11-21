@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Administrator overview</title>
+    <style>
+        @page { size: A4; margin: 16mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Report; font-size: 10pt; color: #1f2430; line-height: 1.45; margin: 0; }
+        h1 { font-family: ReportBold; font-size: 19pt; margin: 4pt 0 2pt 0; }
+        h2 { font-family: ReportBold; font-size: 12pt; margin: 16pt 0 6pt 0; border-bottom: 0.6pt solid #d8dce5; padding-bottom: 3pt; }
+        .brand { font-family: ReportBold; font-size: 11pt; letter-spacing: 0.4pt; color: #2f5bd7; }
+        .muted { color: #6b7280; font-size: 8.5pt; }
+        .kpis { display: flex; gap: 8pt; margin-top: 12pt; }
+        .kpi { flex: 1; border: 0.8pt solid #d8dce5; border-radius: 6pt; padding: 9pt 11pt; background: #f7f9fc; }
+        .kpi .value { font-family: ReportBold; font-size: 18pt; }
+        .kpi .name { font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3pt; }
+        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        th, td { text-align: left; padding: 4pt 6pt; border-bottom: 0.5pt solid #e5e9f0; }
+        th { font-family: ReportBold; color: #4b5563; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; }
+        td.num, th.num { text-align: right; }
+        .badge { display: inline-block; padding: 2pt 7pt; border-radius: 9pt; font-size: 7.5pt; font-family: ReportBold; background: #e8eefc; color: #27418f; }
+        footer { margin-top: 18pt; padding-top: 6pt; border-top: 0.5pt solid #e5e9f0; font-size: 7.5pt; color: #9aa1ad; }
+    </style>
+</head>
+<body>
+
+<div class="brand">EXAMGUARD</div>
+<div class="muted">Administrator overview</div>
+<h1>Platform report</h1>
+<div class="muted" th:text="'Generated ' + ${generatedAt}">Generated</div>
+
+<div class="kpis">
+    <div class="kpi">
+        <div class="name">Users</div>
+        <div class="value" th:text="${users}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Lecturers</div>
+        <div class="value" th:text="${lecturers}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Students</div>
+        <div class="value" th:text="${students}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Exams</div>
+        <div class="value" th:text="${exams}">0</div>
+    </div>
+</div>
+
+<div class="kpis">
+    <div class="kpi">
+        <div class="name">Attempts</div>
+        <div class="value" th:text="${attempts}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Findings</div>
+        <div class="value" th:text="${findings}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Open findings</div>
+        <div class="value" th:text="${openFindings}">0</div>
+    </div>
+    <div class="kpi">
+        <div class="name">Analysis service</div>
+        <div class="value" th:text="${analysisStatus}">UNKNOWN</div>
+    </div>
+</div>
+
+<h2>Recent exams</h2>
+<table th:if="${recentExams != null and !recentExams.isEmpty()}">
+    <thead>
+    <tr><th>Code</th><th>Title</th><th>Status</th><th class="num">Attempts</th><th class="num">Findings</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="e : ${recentExams}">
+        <td th:text="${e.code}">DEMO-101</td>
+        <td th:text="${e.title}">Title</td>
+        <td><span class="badge" th:text="${e.status}">OPEN</span></td>
+        <td class="num" th:text="${e.attempts}">0</td>
+        <td class="num" th:text="${e.findings}">0</td>
+    </tr>
+    </tbody>
+</table>
+<div class="muted" th:if="${recentExams == null or recentExams.isEmpty()}">No exams yet.</div>
+
+<footer>ExamGuard - administrative report. Priority scores rank review attention only.</footer>
+
+</body>
+</html>

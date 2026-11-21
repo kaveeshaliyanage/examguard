@@ -10,6 +10,7 @@ const colors: Record<string, ChipProps['color']> = {
   IN_PROGRESS: 'info',
   SUBMITTED: 'success',
   EXPIRED: 'default',
+  TERMINATED: 'error',
   CONFIRMED: 'error',
   DISMISSED: 'default',
   NEEDS_INFO: 'warning',

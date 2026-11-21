@@ -13,6 +13,7 @@ on:
 permissions:
   contents: write
   packages: write
+  checks: read
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -23,12 +24,50 @@ env:
   IMAGE_PREFIX: examguard
 
 jobs:
-  publish:
+  verify:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for a green CI run on the tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ci_jobs='["backend","backend-postgres","ai","ai-eval","runner","frontend","extension","compose"]'
+          deadline=$((SECONDS + 1500))
+          while :; do
+            check_runs=$(gh api \
+              "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs?per_page=100")
+            completed=$(jq --argjson names "$ci_jobs" \
+              '[.check_runs[] | select(.name as $n | $names | index($n)) | select(.status == "completed")] | length' \
+              <<<"$check_runs")
+            failed=$(jq --argjson names "$ci_jobs" \
+              '[.check_runs[] | select(.name as $n | $names | index($n)) | select(.status == "completed" and .conclusion != "success")] | length' \
+              <<<"$check_runs")
+            if [ "$failed" -gt 0 ]; then
+              echo "CI failed on ${{ github.sha }}; refusing to publish." >&2
+              exit 1
+            fi
+            if [ "$completed" -ge 8 ]; then
+              echo "All ${completed} CI jobs succeeded on ${{ github.sha }}."
+              exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "CI did not finish within 25 minutes (${completed} of 8 jobs)." >&2
+              exit 1
+            fi
+            sleep 30
+          done
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        component: [backend, ai, frontend]
+        component: [backend, ai, frontend, runner]
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +93,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -70,6 +109,7 @@ jobs:
     needs: publish
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -101,6 +141,7 @@ jobs:
             - `ghcr.io/${{ github.repository_owner }}/examguard-backend:${{ github.ref_name }}`
             - `ghcr.io/${{ github.repository_owner }}/examguard-ai:${{ github.ref_name }}`
             - `ghcr.io/${{ github.repository_owner }}/examguard-frontend:${{ github.ref_name }}`
+            - `ghcr.io/${{ github.repository_owner }}/examguard-runner:${{ github.ref_name }}`
 
             Deploy with `scripts/deploy.sh ${{ github.ref_name }}` on the VPS, or run the
             CD workflow manually with `deploy` enabled.
@@ -113,6 +154,7 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.deploy)
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: production
     steps:
       - name: Configure SSH

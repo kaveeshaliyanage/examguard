@@ -9,6 +9,7 @@ import com.examguard.domain.Exam;
 import com.examguard.domain.ExamStatus;
 import com.examguard.domain.User;
 import com.examguard.dto.AnalysisDtos.AnalysisResponse;
+import com.examguard.dto.AnalysisDtos.AuthorshipResponse;
 import com.examguard.dto.AnalysisDtos.FindingResult;
 import com.examguard.repo.AnalysisRunRepository;
 import com.examguard.repo.AttemptRepository;
@@ -124,6 +125,12 @@ public class AnalysisService {
         AnalysisResponse incidents = analysisClient.analyzeIncidents(payloads.incidents());
         List<FindingResult> findings = new ArrayList<>(pairs.findings());
         findings.addAll(incidents.findings());
+        AuthorshipResponse authorship = analysisClient.analyzeAuthorship(payloads.authorship());
+        if (authorship != null && authorship.findings() != null) {
+            authorship.findings().stream()
+                    .map(AuthorshipPolicy::toFinding)
+                    .forEach(findings::add);
+        }
         String modelVersion = pairs.modelVersion() == null ? DEFAULT_MODEL_VERSION : pairs.modelVersion();
 
         Integer created = transaction.execute(status ->
@@ -189,7 +196,8 @@ public class AnalysisService {
     private String hash(Payloads payloads) {
         try {
             String canonical = objectMapper.writeValueAsString(payloads.pairs())
-                    + "\n" + objectMapper.writeValueAsString(payloads.incidents());
+                    + "\n" + objectMapper.writeValueAsString(payloads.incidents())
+                    + "\n" + objectMapper.writeValueAsString(payloads.authorship());
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(canonical.getBytes(StandardCharsets.UTF_8)));
         } catch (JsonProcessingException | NoSuchAlgorithmException ex) {

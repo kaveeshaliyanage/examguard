@@ -1,7 +1,14 @@
 server:
   port: 8080
+  # Behind Render's load balancer or the nginx proxy every request arrives from the proxy, so
+  # rate limits keyed on the client address would lump all students together. Tomcat's remote-IP
+  # valve takes the client from X-Forwarded-For, trusting only private-range proxies by default;
+  # widen that with SERVER_TOMCAT_REMOTEIP_INTERNALPROXIES (a regex) if your proxy is elsewhere.
+  forward-headers-strategy: native
   error:
-    include-message: always
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
 
 spring:
   application:
@@ -10,6 +17,9 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/examguard?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${SPRING_DATASOURCE_USERNAME:examguard}
     password: ${SPRING_DATASOURCE_PASSWORD:examguard}
+    hikari:
+      # Keep this under the database's connection limit (Supabase's pooler caps each user).
+      maximum-pool-size: ${DB_POOL_SIZE:10}
   jpa:
     open-in-view: false
     hibernate:
@@ -22,6 +32,8 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # DDL is per-vendor; common holds portable data-only migrations.
+    locations: classpath:db/migration/common,classpath:db/migration/${app.db.vendor:mysql}
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -32,6 +44,14 @@ spring:
     multipart:
       max-file-size: 1MB
       max-request-size: 1MB
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${MAIL_STARTTLS:false}
 
 management:
   endpoints:
@@ -41,19 +61,45 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+  health:
+    # PIN email is optional and must never take the API down: an SMTP outage (or no relay at
+    # all) would otherwise turn /actuator/health DOWN and make Render pull the instance.
+    mail:
+      enabled: false
 
 app:
+  db:
+    vendor: ${DB_VENDOR:mysql}
   jwt:
-    secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+    # No default: JwtService refuses to start without a secret of at least 32 bytes.
+    secret: ${JWT_SECRET:}
     staff-ttl-minutes: ${JWT_STAFF_TTL_MINUTES:480}
     attempt-ttl-minutes: ${JWT_ATTEMPT_TTL_MINUTES:360}
   analysis:
     base-url: ${ANALYSIS_BASE_URL:http://localhost:8000}
+    # Shared secret sent as X-Analysis-Token; required whenever the analysis service is public.
+    token: ${ANALYSIS_TOKEN:}
     connect-timeout-ms: 5000
     read-timeout-ms: 120000
+  code-runner:
+    base-url: ${CODE_RUNNER_BASE_URL:http://localhost:8001}
+    token: ${RUNNER_TOKEN:}
+    connect-timeout-ms: 3000
+    read-timeout-ms: 90000
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
-  seed-demo-data: ${SEED_DEMO_DATA:true}
+  mail:
+    # When false the PIN is returned once to the lecturer and never emailed or logged.
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:no-reply@examguard.local}
+  attempt-expiry:
+    interval-ms: ${ATTEMPT_EXPIRY_INTERVAL_MS:15000}
+  seed-demo-data: ${SEED_DEMO_DATA:false}
+  # Creates the first ADMIN on an empty database; ignored once any administrator exists.
+  bootstrap-admin:
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    display-name: ${BOOTSTRAP_ADMIN_NAME:Administrator}
 
 logging:
   level:

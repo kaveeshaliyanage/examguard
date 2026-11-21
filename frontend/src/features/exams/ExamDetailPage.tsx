@@ -5,31 +5,48 @@ import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import LinearProgress from '@mui/material/LinearProgress';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthProvider';
 import { ApiError } from '../../api/client';
-import { useAnalysisRuns, useExam, useRunAnalysis } from '../../api/staffQueries';
+import {
+  downloadExamReport,
+  useAnalysisRuns,
+  useExam,
+  useRunAnalysis,
+} from '../../api/staffQueries';
+import type { ExamReportFormat } from '../../api/staffQueries';
 import type { FindingStatus, FindingType } from '../../api/types';
 import { AppShell } from '../../components/AppShell';
 import { LoadingBlock } from '../../components/LoadingBlock';
 import { StatusChip } from '../../components/StatusChip';
+import { useToast } from '../../components/ToastProvider';
+import { saveBlob } from '../../lib/download';
 import { formatDurationMinutes, humanize } from '../../lib/format';
 import { AttemptsTab } from './AttemptsTab';
 import { ExamOverviewTab } from './ExamOverviewTab';
+import { GradingTab } from './GradingTab';
+import { QuestionsTab } from './QuestionsTab';
 import { FindingsTab } from './FindingsTab';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
 
-const tabs = ['overview', 'attempts', 'findings', 'runs', 'settings'] as const;
+const tabs = ['overview', 'questions', 'grading', 'attempts', 'findings', 'runs', 'settings'] as const;
 type TabValue = (typeof tabs)[number];
 
-const findingTypes: FindingType[] = ['CANDIDATE_PAIR', 'CANDIDATE_INCIDENT'];
+const findingTypes: FindingType[] = [
+  'CANDIDATE_PAIR',
+  'CANDIDATE_INCIDENT',
+  'CANDIDATE_AUTHORSHIP',
+];
 const findingStatuses: FindingStatus[] = [
   'OPEN',
   'CONFIRMED',
@@ -43,12 +60,15 @@ export function ExamDetailPage() {
   const { examId } = useParams();
   const id = Number(examId);
   const { session } = useAuth();
+  const { showToast } = useToast();
   const [params, setParams] = useSearchParams();
   const examQuery = useExam(Number.isFinite(id) ? id : undefined);
   const runsQuery = useAnalysisRuns(Number.isFinite(id) ? id : undefined);
   const runAnalysis = useRunAnalysis(Number.isFinite(id) ? id : 0);
   const [runError, setRunError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<ExamReportFormat | null>(null);
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
 
   const tab: TabValue = tabs.includes(params.get('tab') as TabValue)
     ? (params.get('tab') as TabValue)
@@ -106,6 +126,23 @@ export function ExamDetailPage() {
     });
   };
 
+  const exportReport = async (format: ExamReportFormat) => {
+    if (!exam) return;
+    setExporting(format);
+    try {
+      const blob = await downloadExamReport(exam.id, format);
+      saveBlob(blob, `${exam.code}-report.${format}`);
+      showToast(`${format.toUpperCase()} report downloaded.`, { severity: 'success' });
+    } catch (caught) {
+      showToast(
+        caught instanceof ApiError ? caught.message : 'The report could not be downloaded.',
+        { severity: 'error' },
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
   return (
     <AppShell
       breadcrumb={
@@ -115,14 +152,47 @@ export function ExamDetailPage() {
         </Stack>
       }
       actions={
-        <Button
-          variant="contained"
-          startIcon={<PlayArrowIcon />}
-          onClick={startRun}
-          disabled={!canRun || runAnalysis.isPending}
-        >
-          {runAnalysis.isPending ? 'Analysing…' : 'Run analysis'}
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadOutlinedIcon />}
+            onClick={(event) => setExportAnchor(event.currentTarget)}
+            disabled={!exam || exporting !== null}
+            aria-haspopup="menu"
+          >
+            {exporting ? 'Preparing…' : 'Export'}
+          </Button>
+          <Menu
+            anchorEl={exportAnchor}
+            open={Boolean(exportAnchor)}
+            onClose={() => setExportAnchor(null)}
+          >
+            <MenuItem
+              onClick={() => {
+                setExportAnchor(null);
+                void exportReport('csv');
+              }}
+            >
+              CSV spreadsheet
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setExportAnchor(null);
+                void exportReport('pdf');
+              }}
+            >
+              PDF report
+            </MenuItem>
+          </Menu>
+          <Button
+            variant="contained"
+            startIcon={<PlayArrowIcon />}
+            onClick={startRun}
+            disabled={!canRun || runAnalysis.isPending}
+          >
+            {runAnalysis.isPending ? 'Analysing…' : 'Run analysis'}
+          </Button>
+        </Stack>
       }
     >
       <Stack spacing={3}>
@@ -158,6 +228,8 @@ export function ExamDetailPage() {
 
             <Tabs value={tab} onChange={(_, value: TabValue) => update({ tab: value })} variant="scrollable">
               <Tab value="overview" label="Overview" />
+              <Tab value="questions" label="Questions" />
+              <Tab value="grading" label="Grading" />
               <Tab value="attempts" label="Attempts" />
               <Tab value="findings" label="Findings" />
               <Tab value="runs" label="Runs" />
@@ -165,6 +237,8 @@ export function ExamDetailPage() {
             </Tabs>
 
             {tab === 'overview' ? <ExamOverviewTab exam={exam} latestRun={latestRun} /> : null}
+            {tab === 'questions' ? <QuestionsTab exam={exam} canManage={isOwner} /> : null}
+            {tab === 'grading' ? <GradingTab exam={exam} canReview={isOwner || isAdmin} /> : null}
             {tab === 'attempts' ? <AttemptsTab examId={exam.id} /> : null}
             {tab === 'findings' ? (
               <FindingsTab

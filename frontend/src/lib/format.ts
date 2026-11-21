@@ -13,6 +13,30 @@ export function formatDateTime(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? '—' : dateTime.format(date);
 }
 
+/** ISO instant to the `datetime-local` input value in the browser's time zone. */
+export function toDateTimeLocalValue(value: string | null | undefined): string {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
+/** `datetime-local` value (browser-local) to an ISO instant, or null when blank/invalid. */
+export function fromDateTimeLocalValue(value: string): string | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return '—';

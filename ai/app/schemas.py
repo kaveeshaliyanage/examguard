@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -33,7 +33,9 @@ class Answer(StrictModel):
 
 
 class Evidence(StrictModel):
-    source: Literal["SIMILARITY", "PATTERN", "TIMING", "ACTIVITY", "ANSWER_CHANGE", "COVERAGE"]
+    source: Literal[
+        "SIMILARITY", "PATTERN", "TIMING", "ACTIVITY", "ANSWER_CHANGE", "COVERAGE", "AUTHORSHIP"
+    ]
     weight: float = 0.0
     questionId: int | None = None
     detail: str = ""
@@ -125,7 +127,74 @@ class IncidentAnalysisRequest(StrictModel):
     config: IncidentConfig = Field(default_factory=IncidentConfig)
 
 
+# --- authorship analysis ----------------------------------------------------
+#
+# An authorship request is deliberately single-cohort: one request describes the answers of
+# one candidate. A request that repeats a candidate code is rejected instead of silently
+# merging two candidates into one stylometric profile.
+
+
+class AuthorshipRevision(StrictModel):
+    revisionNo: int
+    text: str = ""
+    savedAt: datetime
+    wordCount: int | None = None
+
+
+class AuthorshipAnswer(StrictModel):
+    questionId: int
+    text: str = ""
+    revisions: list[AuthorshipRevision] = Field(default_factory=list)
+
+
+class AuthorshipCandidate(StrictModel):
+    candidateCode: str
+    attemptId: int | None = None
+    answers: list[AuthorshipAnswer] = Field(default_factory=list)
+
+
+class AuthorshipConfig(StrictModel):
+    minAnswerChars: int = 200
+    maxFindings: int = 200
+
+
+class AuthorshipRequest(StrictModel):
+    examId: int
+    modelVersion: str = "rules-1.0"
+    candidates: list[AuthorshipCandidate]
+    config: AuthorshipConfig = Field(default_factory=AuthorshipConfig)
+
+    @model_validator(mode="after")
+    def _reject_duplicate_candidates(self) -> "AuthorshipRequest":
+        codes = [candidate.candidateCode for candidate in self.candidates]
+        duplicates = sorted({code for code in codes if codes.count(code) > 1})
+        if duplicates:
+            raise ValueError(
+                f"authorship request repeats candidate code(s): {', '.join(duplicates)}"
+            )
+        return self
+
+
+class AuthorshipFinding(StrictModel):
+    candidateCode: str
+    questionId: int
+    priorityScore: float = Field(ge=0.0, le=100.0)
+    priorityBand: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    probability: float = Field(ge=0.0, le=1.0)
+    summary: str
+    features: dict[str, float] = Field(default_factory=dict)
+    evidence: list[Evidence] = Field(default_factory=list)
+
+
+class AuthorshipResponse(StrictModel):
+    modelVersion: str
+    findings: list[AuthorshipFinding] = Field(default_factory=list)
+    stats: dict[str, Any] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     modelVersion: str
     semanticAvailable: bool
+    authorshipAvailable: bool = True
+    authorshipScoreCap: float = 54.0

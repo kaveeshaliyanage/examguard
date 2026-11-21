@@ -14,6 +14,8 @@ import com.examguard.domain.Question;
 import com.examguard.domain.Role;
 import com.examguard.domain.User;
 import com.examguard.dto.AnalysisDtos.AnalysisResponse;
+import com.examguard.dto.AnalysisDtos.AuthorshipRequest;
+import com.examguard.dto.AnalysisDtos.AuthorshipResponse;
 import com.examguard.dto.AnalysisDtos.EvidenceResult;
 import com.examguard.dto.AnalysisDtos.FindingResult;
 import com.examguard.dto.AnalysisDtos.IncidentAnalysisRequest;
@@ -91,6 +93,8 @@ class AnalysisFlowTest extends ApiTestBase {
                 .willReturn(new AnalysisResponse("mock-1.0", List.of(pairFinding()), Map.of()));
         given(analysisClient.analyzeIncidents(any(IncidentAnalysisRequest.class)))
                 .willReturn(new AnalysisResponse("mock-1.0", List.of(incidentFinding()), Map.of()));
+        given(analysisClient.analyzeAuthorship(any(AuthorshipRequest.class)))
+                .willReturn(new AuthorshipResponse("mock-1.0", List.of(), Map.of()));
     }
 
     @Test
@@ -141,6 +145,7 @@ class AnalysisFlowTest extends ApiTestBase {
 
         then(analysisClient).should().analyzePairs(any(PairAnalysisRequest.class));
         then(analysisClient).should().analyzeIncidents(any(IncidentAnalysisRequest.class));
+        then(analysisClient).should().analyzeAuthorship(any(AuthorshipRequest.class));
     }
 
     @Test

@@ -79,6 +79,42 @@ public final class AnalysisDtos {
             IncidentConfig config) {
     }
 
+    public record AuthorshipRevisionPayload(Integer revisionNo, String text, Instant savedAt) {
+    }
+
+    public record AuthorshipAnswerPayload(Long questionId, String text, List<AuthorshipRevisionPayload> revisions) {
+    }
+
+    public record AuthorshipCandidatePayload(String candidateCode, Long attemptId, List<AuthorshipAnswerPayload> answers) {
+    }
+
+    public record AuthorshipConfig(int minAnswerChars, int maxFindings) {
+    }
+
+    public record AuthorshipRequest(
+            Long examId,
+            String modelVersion,
+            List<AuthorshipCandidatePayload> candidates,
+            AuthorshipConfig config) {
+    }
+
+    public record AuthorshipFindingResult(
+            String candidateCode,
+            Long questionId,
+            double priorityScore,
+            String priorityBand,
+            double probability,
+            String summary,
+            Map<String, Object> features,
+            List<EvidenceResult> evidence) {
+    }
+
+    public record AuthorshipResponse(
+            String modelVersion,
+            List<AuthorshipFindingResult> findings,
+            Map<String, Object> stats) {
+    }
+
     public record EvidenceResult(
             String source,
             double weight,

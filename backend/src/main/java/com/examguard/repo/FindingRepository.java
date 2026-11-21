@@ -12,6 +12,8 @@ public interface FindingRepository extends JpaRepository<Finding, Long> {
 
     List<Finding> findByExamIdOrderByPriorityScoreDesc(Long examId);
 
+    List<Finding> findTop500ByOrderByPriorityScoreDesc();
+
     List<Finding> findByExamIdAndTypeOrderByPriorityScoreDesc(Long examId, FindingType type);
 
     List<Finding> findByExamIdAndStatusOrderByPriorityScoreDesc(Long examId, FindingStatus status);

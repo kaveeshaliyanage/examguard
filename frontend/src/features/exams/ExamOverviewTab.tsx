@@ -17,13 +17,23 @@ export function ExamOverviewTab({ exam, latestRun }: ExamOverviewTabProps) {
     <Stack spacing={3}>
       <Paper variant="outlined" sx={{ p: 3 }}>
         <Stack spacing={1}>
-          <Typography variant="h6">Description</Typography>
+          <Typography variant="h6" component="h5">Description</Typography>
           <Typography color={exam.description ? 'text.primary' : 'text.secondary'}>
             {exam.description || 'No description provided.'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Duration: {formatDurationMinutes(exam.durationMinutes)} · Extension:{' '}
             {exam.allowExtension ? 'allowed' : 'not offered'} · Created {formatDateTime(exam.createdAt)}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Schedule: {exam.opensAt ? `opens ${formatDateTime(exam.opensAt)}` : 'opens any time'} ·{' '}
+            {exam.closesAt ? `closes ${formatDateTime(exam.closesAt)}` : 'closes manually'} ·{' '}
+            {exam.enrollmentCount === 0
+              ? 'open to anyone with the exam code'
+              : `${exam.enrollmentCount} student${exam.enrollmentCount === 1 ? '' : 's'} enrolled`}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            The schedule blocks new joins only. Attempts already in progress can always resume.
           </Typography>
           {latestRun ? (
             <Stack direction="row" spacing={1} alignItems="center">
@@ -44,7 +54,7 @@ export function ExamOverviewTab({ exam, latestRun }: ExamOverviewTabProps) {
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
+        <Typography variant="h6" component="h5" gutterBottom>
           Questions
         </Typography>
         <Stack spacing={2} divider={<Divider flexItem />}>
@@ -62,7 +72,7 @@ export function ExamOverviewTab({ exam, latestRun }: ExamOverviewTabProps) {
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
+        <Typography variant="h6" component="h5" gutterBottom>
           Resource rules
         </Typography>
         {exam.resourceRules.length === 0 ? (

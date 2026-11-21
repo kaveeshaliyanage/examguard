@@ -9,11 +9,15 @@ import com.examguard.repo.ExamPermissionRepository;
 import com.examguard.repo.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AccessService {
+
+    public static final String SCOPE_ATTEMPT = "ATTEMPT";
+    public static final String SCOPE_ACCOUNT = "ACCOUNT";
 
     private final UserRepository userRepository;
     private final ExamPermissionRepository permissionRepository;
@@ -28,11 +32,24 @@ public class AccessService {
     }
 
     public String role(Authentication auth) {
-        if (auth == null || !auth.isAuthenticated() || auth.getAuthorities().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
-        }
-        String authority = auth.getAuthorities().iterator().next().getAuthority();
-        return authority.startsWith("ROLE_") ? authority.substring(5) : authority;
+        requireAuthentication(auth);
+        return auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring(5))
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required"));
+    }
+
+    /** Account and attempt tokens both carry role STUDENT; the scope claim tells them apart. */
+    public String scope(Authentication auth) {
+        requireAuthentication(auth);
+        return auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("SCOPE_"))
+                .map(authority -> authority.substring(6))
+                .findFirst()
+                .orElse(null);
     }
 
     public boolean isStaff(Authentication auth) {
@@ -98,8 +115,12 @@ public class AccessService {
     public Attempt requireAttemptOwner(Authentication auth, Long attemptId) {
         Attempt attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Attempt not found"));
-        if (!"STUDENT".equals(role(auth)) || !String.valueOf(attempt.getId()).equals(auth.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This attempt token does not own attempt");
+        return requireAttemptOwner(auth, attempt);
+    }
+
+    public Attempt requireAttemptOwner(Authentication auth, Attempt attempt) {
+        if (!ownsAttempt(auth, attempt)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This token does not own the attempt");
         }
         return attempt;
     }
@@ -117,13 +138,21 @@ public class AccessService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Attempt not found"));
 
         if ("STUDENT".equals(role(auth))) {
-            if (String.valueOf(attempt.getId()).equals(auth.getName())) {
+            if (ownsAttempt(auth, attempt)) {
                 return attempt;
             }
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not this attempt");
         }
         requireExamView(auth, attempt.getExam().getId());
         return attempt;
+    }
+
+    public User requireStudentAccount(Authentication auth) {
+        if (!"STUDENT".equals(role(auth)) || !SCOPE_ACCOUNT.equals(scope(auth))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Student account token required");
+        }
+        return userRepository.findById(actorId(auth))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
     }
 
     public User currentUser(Authentication auth) {
@@ -135,5 +164,26 @@ public class AccessService {
     public ExamPermission permission(Long examId, Long userId) {
         return permissionRepository.findByExamIdAndUserId(examId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "No permission"));
+    }
+
+    private boolean ownsAttempt(Authentication auth, Attempt attempt) {
+        if (!"STUDENT".equals(role(auth))) {
+            return false;
+        }
+        String scope = scope(auth);
+        if (SCOPE_ATTEMPT.equals(scope)) {
+            return String.valueOf(attempt.getId()).equals(auth.getName());
+        }
+        if (SCOPE_ACCOUNT.equals(scope)) {
+            return attempt.getStudentUser() != null
+                    && String.valueOf(attempt.getStudentUser().getId()).equals(auth.getName());
+        }
+        return false;
+    }
+
+    private void requireAuthentication(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated() || auth.getAuthorities().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
     }
 }

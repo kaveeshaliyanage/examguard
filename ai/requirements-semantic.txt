@@ -1,4 +1,6 @@
 -r requirements.txt
 # Optional. Large download; enables the semantic-similarity evidence source.
 # Build the image with: docker build --build-arg INSTALL_SEMANTIC=true ...
-sentence-transformers>=3.3
+# torch is deliberately not pinned here: its wheels differ per platform and CUDA build,
+# so pin it in the deployment environment when reproducible semantic builds matter.
+sentence-transformers==6.2.0

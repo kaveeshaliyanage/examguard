@@ -1,5 +1,23 @@
-import { isJoinResponse, isRecord, request } from './client';
-import type { AttemptState, JoinResponse, SaveAnswerResponse, SubmitResponse } from './types';
+import { isArrayOf, isJoinResponse, isRecord, request } from './client';
+import type {
+  AttemptState,
+  IntegritySignal,
+  IntegritySignalResponse,
+  JoinResponse,
+  PreflightPayload,
+  PreflightResult,
+  SaveAnswerResponse,
+  SubmitResponse,
+} from './types';
+
+function isAnswer(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.questionId === 'number' &&
+    typeof value.text === 'string' &&
+    (value.selectedOptions === undefined || isArrayOf(value.selectedOptions, (item) => typeof item === 'string'))
+  );
+}
 
 function isAttemptState(value: unknown): boolean {
   return (
@@ -9,15 +27,59 @@ function isAttemptState(value: unknown): boolean {
     typeof value.startedAt === 'string' &&
     typeof value.serverNow === 'string' &&
     isRecord(value.exam) &&
-    Array.isArray(value.answers)
+    isArrayOf(value.answers, isAnswer)
   );
 }
 
-export function joinExam(examCode: string, candidateCode: string): Promise<JoinResponse> {
+function isIntegritySignalResponse(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.strikeCount === 'number' &&
+    typeof value.maxStrikes === 'number' &&
+    typeof value.terminated === 'boolean' &&
+    typeof value.status === 'string'
+  );
+}
+
+export interface JoinOptions {
+  accessPin?: string;
+  resumeToken?: string;
+}
+
+export function joinExam(
+  examCode: string,
+  candidateCode: string,
+  options: JoinOptions = {},
+): Promise<JoinResponse> {
+  const body: Record<string, string> = { examCode, candidateCode };
+  if (options.accessPin?.trim()) {
+    body.accessPin = options.accessPin.trim();
+  }
+  if (options.resumeToken) {
+    body.resumeToken = options.resumeToken;
+  }
   return request<JoinResponse>('/public/join', {
     method: 'POST',
-    body: { examCode, candidateCode },
+    body,
     validate: isJoinResponse,
+  });
+}
+
+export function completePreflight(
+  attemptId: number,
+  token: string,
+  payload: PreflightPayload,
+): Promise<PreflightResult> {
+  return request<PreflightResult>(`/attempts/${attemptId}/preflight`, {
+    method: 'POST',
+    token,
+    scope: 'attempt',
+    body: payload,
+    validate: (value) =>
+      isRecord(value) &&
+      typeof value.completedAt === 'string' &&
+      typeof value.activeStartedAt === 'string' &&
+      typeof value.deadlineAt === 'string',
   });
 }
 
@@ -35,12 +97,13 @@ export function saveAnswer(
   questionId: number,
   text: string,
   clientSeq: number,
+  selectedOptions: string[] = [],
 ): Promise<SaveAnswerResponse> {
   return request<SaveAnswerResponse>(`/attempts/${attemptId}/answers/${questionId}`, {
     method: 'PUT',
     token,
     scope: 'attempt',
-    body: { text, clientSeq },
+    body: { text, selectedOptions, clientSeq },
     validate: (value) =>
       isRecord(value) &&
       typeof value.questionId === 'number' &&
@@ -54,5 +117,21 @@ export function submitAttempt(attemptId: number, token: string): Promise<SubmitR
     method: 'POST',
     token,
     scope: 'attempt',
+  });
+}
+
+export function postIntegritySignal(
+  attemptId: number,
+  token: string,
+  episodeKey: string,
+  signal: IntegritySignal,
+  occurredAt: string,
+): Promise<IntegritySignalResponse> {
+  return request<IntegritySignalResponse>(`/attempts/${attemptId}/integrity/signals`, {
+    method: 'POST',
+    token,
+    scope: 'attempt',
+    body: { episodeKey, signal, occurredAt },
+    validate: isIntegritySignalResponse,
   });
 }

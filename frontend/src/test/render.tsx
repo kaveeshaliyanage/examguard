@@ -4,6 +4,8 @@ import { render } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../AuthProvider';
+import { ToastProvider } from '../components/ToastProvider';
+import { StudentAuthProvider } from '../features/student/StudentAuthProvider';
 import { theme } from '../theme';
 
 function testQueryClient(): QueryClient {
@@ -18,7 +20,11 @@ function testQueryClient(): QueryClient {
 function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider theme={theme}>
-      <QueryClientProvider client={testQueryClient()}>{children}</QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={testQueryClient()}>
+          <StudentAuthProvider>{children}</StudentAuthProvider>
+        </QueryClientProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

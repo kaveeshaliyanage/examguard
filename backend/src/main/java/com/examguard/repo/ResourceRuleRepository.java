@@ -8,4 +8,6 @@ import java.util.List;
 public interface ResourceRuleRepository extends JpaRepository<ResourceRule, Long> {
 
     List<ResourceRule> findByExamIdOrderByIdAsc(Long examId);
+
+    void deleteByExamId(Long examId);
 }

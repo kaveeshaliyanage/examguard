@@ -47,6 +47,27 @@ public class Exam {
     @Column(name = "allow_extension", nullable = false)
     private boolean allowExtension = true;
 
+    @Column(name = "max_strikes", nullable = false)
+    private Integer maxStrikes = 3;
+
+    @Column(columnDefinition = "text")
+    private String instructions;
+
+    @Column(name = "requires_pin", nullable = false)
+    private boolean requiresPin;
+
+    @Column(name = "access_pin_hash", length = 100)
+    private String accessPinHash;
+
+    @Column(name = "access_pin_issued_at")
+    private Instant accessPinIssuedAt;
+
+    @Column(name = "access_pin_sent_at")
+    private Instant accessPinSentAt;
+
+    @Column(name = "requires_preflight", nullable = false)
+    private boolean requiresPreflight = true;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -57,6 +78,9 @@ public class Exam {
         }
         if (status == null) {
             status = ExamStatus.DRAFT;
+        }
+        if (maxStrikes == null) {
+            maxStrikes = 3;
         }
     }
 }

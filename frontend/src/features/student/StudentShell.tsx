@@ -10,12 +10,23 @@ interface StudentShellProps {
   children: ReactNode;
   title?: string;
   right?: ReactNode;
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-export function StudentShell({ children, title, right }: StudentShellProps) {
+export function StudentShell({ children, title, right, maxWidth = 'md' }: StudentShellProps) {
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <AppBar position="static" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+      <AppBar
+        position="sticky"
+        color="inherit"
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'rgba(255, 255, 255, 0.94)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="h6" color="primary" sx={{ fontWeight: 700 }}>
             ExamGuard
@@ -30,12 +41,12 @@ export function StudentShell({ children, title, right }: StudentShellProps) {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: { xs: 2, md: 4 }, flexGrow: 1 }}>
+      <Container maxWidth={maxWidth} sx={{ py: { xs: 2, md: 4 }, flexGrow: 1 }}>
         {children}
       </Container>
 
       <Box component="footer" sx={{ py: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-        <Container maxWidth="md">
+        <Container maxWidth={maxWidth}>
           <Stack spacing={0.5}>
             <Typography variant="caption" color="text.secondary">
               Monitoring collects domain names and navigation times only. Page content, keystrokes and

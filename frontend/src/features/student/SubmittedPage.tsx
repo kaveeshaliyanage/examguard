@@ -6,6 +6,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { useQuery } from '@tanstack/react-query';
+import { Link as RouterLink } from 'react-router-dom';
 import { Navigate, useParams } from 'react-router-dom';
 import { fetchAttemptState } from '../../api/attemptApi';
 import { readAttemptReceipt, readAttemptSession } from '../../auth/storage';
@@ -100,9 +101,18 @@ export function SubmittedPage() {
             </Alert>
           </Stack>
         </Paper>
-        <Button variant="outlined" onClick={() => window.close()} sx={{ alignSelf: 'flex-start' }}>
-          Close this tab
-        </Button>
+        <Stack direction="row" spacing={1} sx={{ alignSelf: 'flex-start' }}>
+          <Button
+            variant="outlined"
+            component={RouterLink}
+            to={`/attempt/${id}/report`}
+          >
+            View detailed report
+          </Button>
+          <Button variant="outlined" onClick={() => window.close()}>
+            Close this tab
+          </Button>
+        </Stack>
       </Stack>
     </StudentShell>
   );
