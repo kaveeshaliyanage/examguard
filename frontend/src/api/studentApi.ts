@@ -83,12 +83,17 @@ export function joinStudentExam(
   token: string,
   examCode: string,
   candidateCode: string,
+  accessPin?: string,
 ): Promise<JoinResponse> {
   return request<JoinResponse>('/student/attempts/join', {
     method: 'POST',
     token,
     scope: 'student',
-    body: { examCode, candidateCode },
+    body: {
+      examCode,
+      candidateCode,
+      ...(accessPin?.trim() ? { accessPin: accessPin.trim() } : {}),
+    },
     validate: isJoinResponse,
   });
 }

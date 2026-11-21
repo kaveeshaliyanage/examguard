@@ -152,6 +152,28 @@ export function ExamInstructionsPage() {
 
         <Paper variant="outlined" sx={{ p: 2.5 }}>
           <Typography variant="h6" gutterBottom>
+            Pre-exam checks and photo
+          </Typography>
+          <Typography variant="body2" gutterBottom>
+            The exam clock does not start when you join. It starts when you finish these checks and
+            confirm your photo:
+          </Typography>
+          <List dense disablePadding>
+            <Rule ok>Full screen, so other windows cannot share the screen.</Rule>
+            <Rule ok>A live connection test to the exam server.</Rule>
+            <Rule ok>A device check (screen size, processor and that other applications are closed).</Rule>
+            <Rule ok>Microphone access and a two-second room-noise sample.</Rule>
+            <Rule ok>Camera access, with a check that your face is visible and looking at the screen.</Rule>
+            <Rule ok>A photo you review and confirm before the timer starts.</Rule>
+          </List>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            You get the full {formatDurationMinutes(state.exam.durationMinutes)} from the moment you
+            confirm. The microphone and camera are released once the photo is taken.
+          </Typography>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <Typography variant="h6" gutterBottom>
             How this exam is monitored
           </Typography>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
@@ -160,9 +182,12 @@ export function ExamInstructionsPage() {
                 What this browser records
               </Typography>
               <List dense disablePadding>
+                <Rule ok>The pre-exam checks and the photo you confirmed.</Rule>
                 <Rule ok>
-                  Every time the exam tab is hidden or the exam window loses focus, with a timestamp.
+                  Every time the exam tab is hidden, the exam window loses focus or full screen is
+                  exited, with a timestamp.
                 </Rule>
+                <Rule ok>Connection loss and when it is restored.</Rule>
                 <Rule ok>When each answer is saved and revised.</Rule>
                 <Rule ok>
                   Domain-level browsing observations, only if you install the monitoring extension.
@@ -176,7 +201,11 @@ export function ExamInstructionsPage() {
               </Typography>
               <List dense disablePadding>
                 <Rule ok={false}>Read the content of other tabs or applications.</Rule>
-                <Rule ok={false}>Capture keystrokes, screenshots, camera or microphone.</Rule>
+                <Rule ok={false}>Capture keystrokes or screenshots.</Rule>
+                <Rule ok={false}>
+                  Keep the camera or microphone on during the exam; both are released before the
+                  first question appears.
+                </Rule>
                 <Rule ok={false}>
                   Guarantee that every off-screen action is observed. Missing observations are unknown,
                   not proof of clean behaviour.
@@ -212,8 +241,9 @@ export function ExamInstructionsPage() {
           <Typography variant="body2">
             Your answers save automatically while the attempt is in progress, including a copy kept in
             this tab. The save indicator in the header tells you whether the latest edit reached the
-            server. You can navigate between questions freely before submitting. Submitting more than
-            once is safe.
+            server. You can navigate between questions freely before submitting. When the timer reaches
+            zero the exam stops immediately and whatever was saved up to that moment is submitted;
+            questions not answered by then stay unanswered. Submitting more than once is safe.
           </Typography>
         </Paper>
 
@@ -233,9 +263,16 @@ export function ExamInstructionsPage() {
             variant="contained"
             size="large"
             startIcon={<PlayArrowIcon />}
-            onClick={() => navigate(`/attempt/${id}`, { replace: true })}
+            onClick={() =>
+              navigate(
+                state.requiresPreflight && !state.preflightCompletedAt
+                  ? `/attempt/${id}/preflight`
+                  : `/attempt/${id}`,
+                { replace: true },
+              )
+            }
           >
-            Begin exam
+            {state.requiresPreflight && !state.preflightCompletedAt ? 'Start pre-exam checks' : 'Begin exam'}
           </Button>
         </Stack>
       </Stack>

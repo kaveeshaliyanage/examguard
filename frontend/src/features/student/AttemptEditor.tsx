@@ -13,9 +13,10 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import FlagIcon from '@mui/icons-material/Flag';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { submitAttempt } from '../../api/attemptApi';
@@ -36,6 +37,7 @@ import { TerminatedScreen } from './TerminatedScreen';
 import { useAutosave } from './useAutosave';
 import { useCountdown } from './useCountdown';
 import { useIntegrityMonitor } from './useIntegrityMonitor';
+import { useRuntimeSignals } from './useRuntimeSignals';
 
 function receiptFor(state: AttemptState, session: AttemptSession, response: SubmitResponse): void {
   writeAttemptReceipt({
@@ -93,6 +95,7 @@ export function AttemptEditor({
   });
   const [warning, setWarning] = useState<number | null>(null);
   const [integrityError, setIntegrityError] = useState<string | null>(null);
+  const [fullscreenLost, setFullscreenLost] = useState(false);
   const [autosaveStopped, setAutosaveStopped] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const questions = state.exam.questions;
@@ -119,19 +122,22 @@ export function AttemptEditor({
       setSubmitting(true);
       setError(null);
       try {
-        await autosave.flushAll();
+        if (auto) {
+          // Past the deadline the server rejects late edits with 409. Those edits cannot be kept
+          // anyway, so a failed flush must not block submitting the answers saved in time.
+          await autosave.flushAll().catch(() => undefined);
+        } else {
+          await autosave.flushAll();
+        }
         const response = await submitAttempt(state.attemptId, session.sessionToken);
         receiptFor(state, session, response);
         navigate(`/attempt/${state.attemptId}/submitted`, { replace: true });
       } catch (caught) {
-        const message =
-          caught instanceof ApiError
-            ? auto && caught.path === 'autosave'
-              ? 'Time is up, but some answers could not be saved, so the exam was not submitted. Reconnect and submit again.'
-              : caught.message
-            : auto
-              ? 'Time is up but the submission did not reach the server. Please submit again.'
-              : 'Could not submit the exam. Your attempt is still open; please retry.';
+        const message = auto
+          ? 'Time is up but the submission did not reach the server. Your saved answers are kept; submit again.'
+          : caught instanceof ApiError
+            ? caught.message
+            : 'Could not submit the exam. Your attempt is still open; please retry.';
         setError(message);
         setConfirmOpen(false);
         submittingRef.current = false;
@@ -142,7 +148,7 @@ export function AttemptEditor({
   );
 
   const countdown = useCountdown({
-    startedAt: state.startedAt,
+    startedAt: state.activeStartedAt ?? state.startedAt,
     durationMinutes: state.exam.durationMinutes,
     serverNow: state.serverNow,
     enabled: state.status === 'IN_PROGRESS' && !submitting && !terminated,
@@ -184,6 +190,32 @@ export function AttemptEditor({
       );
     },
   });
+
+  const monitoring = state.status === 'IN_PROGRESS' && !terminated;
+  useRuntimeSignals({
+    attemptId: state.attemptId,
+    token: session.sessionToken,
+    enabled: monitoring && state.requiresPreflight,
+  });
+
+  useEffect(() => {
+    if (!state.requiresPreflight || typeof document === 'undefined') {
+      return undefined;
+    }
+    const sync = () =>
+      setFullscreenLost(document.fullscreenEnabled === true && document.fullscreenElement === null);
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, [state.requiresPreflight]);
+
+  const reenterFullscreen = () => {
+    if (typeof document.documentElement.requestFullscreen !== 'function') {
+      setFullscreenLost(false);
+      return;
+    }
+    document.documentElement.requestFullscreen().catch(() => undefined);
+  };
 
   const activeIndex = Math.max(
     0,
@@ -340,6 +372,20 @@ export function AttemptEditor({
           {integrityError ? (
             <Alert severity="warning" onClose={() => setIntegrityError(null)}>
               {integrityError}
+            </Alert>
+          ) : null}
+
+          {fullscreenLost && state.status === 'IN_PROGRESS' ? (
+            <Alert
+              severity="warning"
+              action={
+                <Button color="inherit" size="small" startIcon={<FullscreenIcon />} onClick={reenterFullscreen}>
+                  Re-enter
+                </Button>
+              }
+            >
+              Full screen was exited. Returning to full screen keeps this attempt in the expected
+              conditions.
             </Alert>
           ) : null}
 
