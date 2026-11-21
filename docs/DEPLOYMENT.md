@@ -90,6 +90,36 @@ scored as zero. Start the runner and use **Re-run code judging**, or let the bac
 next submit. The runner's isolation is process-level (non-root, read-only rootfs, rlimits, no
 egress); it is not a proven security boundary for hostile code. Keep it internal-only.
 
+## Exam PIN email
+
+PIN emails are opt-in and never block an exam: when delivery fails, the lecturer still receives the
+PIN once in the **Access PIN** card and the affected roster addresses are listed as
+`failedRecipients`.
+
+**Local compose** starts Mailpit next to the stack. The backend gets `MAIL_ENABLED=true`,
+`MAIL_HOST=mailpit`, `MAIL_PORT=1025` by default, so issuing a PIN sends it to the catcher:
+
+- SMTP: `localhost:1025`
+- Web inbox: <http://localhost:8025>
+
+No mail leaves the machine.
+
+**Production** uses your SMTP relay. Set in `.env`:
+
+```
+MAIL_ENABLED=true
+MAIL_HOST=smtp.your-provider.example
+MAIL_PORT=587
+MAIL_USERNAME=<user>
+MAIL_PASSWORD=<password>
+MAIL_SMTP_AUTH=true
+MAIL_STARTTLS=true
+MAIL_FROM=exams@your-domain.example
+```
+
+`docker-compose.prod.yml` defaults `MAIL_ENABLED=false` so a deployment without a relay never
+attempts delivery. Cloud (Render) sets the same variables as secrets in the dashboard.
+
 ## Rollback
 
 Images are immutable per tag:

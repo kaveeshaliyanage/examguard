@@ -31,9 +31,9 @@ model's job.
 
 | Part | Stack | Status |
 | --- | --- | --- |
-| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL/PostgreSQL | Complete: auth with student accounts, typed exams and authoring (including coding questions), attempts and the 3-strike integrity policy, auto + manual grading with a release gate, sandboxed code judging, reports and PDF export, dashboards, analysis orchestration, findings, decisions, audit |
+| `backend/` | Java 21, Spring Boot 3.4, Security, JPA, Flyway, MySQL/PostgreSQL | Complete: auth with student accounts, typed exams and authoring (including coding questions), exam PINs with email delivery, supervised pre-exam window with identity photo, server-clocked deadline with auto-submit, attempts and the 3-strike integrity policy, auto + manual grading with a release gate, sandboxed code judging, reports and PDF export, dashboards, analysis orchestration, findings, decisions, audit |
 | `ai/` | Python, FastAPI, scikit-learn | Complete: similarity, rare patterns, cross-question reuse, timing, coverage, domain rules, priority fusion, authorship stylometry (capped at 54), isolated payloads |
-| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query/Table, recharts | Complete: staff and admin dashboards, exam authoring with preview, grading queue, findings review, decisions, audit, student dashboard, typed question renderer, code editor, integrity dialog, reports |
+| `frontend/` | React 18, TypeScript strict, Vite 5, MUI 5, TanStack Query/Table, recharts | Complete: staff and admin dashboards, exam authoring with preview, PIN card, grading queue, findings review, decisions, audit, student dashboard, pre-exam checks wizard (fullscreen, connection, device, mic/noise, camera/gaze, photo), typed question renderer, code editor, integrity dialog, reports |
 | `runner/` | Python 3.12, FastAPI | Complete: sandboxed Python/JavaScript/Java execution (per-test output, time limit, output cap, no egress, non-root, read-only rootfs) |
 | `extension/` | Chrome MV3, TypeScript | Complete: domain-only observation, persistent queue, batching, backoff, reconnect flow |
 | `ai/app/training/` | scikit-learn, joblib | Complete: synthetic cohort generators, feature export, calibrated pair/incident/authorship training, model cards, external-corpus adapter |
@@ -54,6 +54,7 @@ docker compose up --build
 - API: http://localhost:8080/api
 - Analysis service: http://localhost:8000/docs
 - MySQL: `localhost:3307`
+- PIN emails (Mailpit inbox): http://localhost:8025
 
 ```bash
 curl http://localhost:8080/api/health
@@ -87,13 +88,17 @@ Three demo exams are seeded (`SEED_DEMO_DATA=true`):
    (at least 10 characters). Every decision is audited.
 6. Open `DEMO-102` → **Grading** to mark the essay, then **Release results**. Sign in as
    `student@examguard.local` to see the released score and download the PDF report.
-7. Student side: `/join` with `DEMO-101` and a fresh candidate code such as `C009`, answer,
-   submit, then run analysis again. Leaving the tab is recorded; the third focus loss ends the
-   attempt.
+7. Student side: `/join` with `DEMO-101`, a fresh candidate code such as `C009`, and the seeded
+   demo PIN `246810`. The pre-exam wizard runs fullscreen, connection, device, mic/noise,
+   camera/gaze and a photo; confirming it starts the exam clock. Answer, submit, then run analysis again. Leaving the tab is recorded; the
+   third focus loss ends the attempt.
+8. PIN email: as the lecturer, open an exam → **Settings** → **Access PIN** → **Issue PIN**. In
+   compose the email lands in Mailpit at http://localhost:8025; the PIN is also shown once.
 
 The extension is optional. Load `extension/dist` as an unpacked extension, connect it with the
 attempt's collector token shown on the student page, and only domains and event times are sent.
-Page content, URLs with paths, keystrokes, screenshots and webcam are never collected.
+Page content, URLs with paths and keystrokes are never collected, and there is no continuous video:
+the only image is the one-time identity photo taken in the pre-exam wizard.
 
 ## Training the models
 

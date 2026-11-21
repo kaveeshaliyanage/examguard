@@ -182,6 +182,32 @@ Measured on this pass (Windows 11, Docker Desktop 29.9.2, compose stack on non-d
 | Playwright (compose, Chrome) | 6/6: coding submit then judge 3/3 passed, exam flow three times, CSV and PDF export, admin findings plus overview PDF |
 | Manual walkthrough | lecturer tabs and the disabled release gate with 10 ungraded answers; CODE authoring form; locked student row toast; report `403` before release and no review signals after; admin findings filters, run history and audit trail |
 
+## 1f. Phase 3 PIN and supervised pre-exam window (2026-11-21)
+
+| Addition | Behaviour |
+| --- | --- |
+| Exam PIN | `POST /exams/{id}/pin` generates a random six-digit PIN, stores only the BCrypt hash, and emails it to every roster address when mail is enabled; the plaintext is returned once and never logged or audited. The **Access PIN** card shows the PIN, issued/emailed time and a copy button |
+| Join validation | A new attempt on a `requiresPin` exam needs `accessPin`: `409` until one is issued, `403` on mismatch, five failures per exam code + client address in ten minutes make the caller `429`. Resuming is always by attempt token or owning student account, so rotating the PIN never strands answers |
+| Pre-exam wizard | `/attempt/:id/preflight`: fullscreen, internet (`/api/health`), device (cores/memory/screen), microphone plus ambient noise (RMS dBFS sampled for 2 s), camera plus gaze (FaceDetector heuristic, attested fallback), then a 3 s countdown photo. Each step must pass before Confirm is enabled |
+| Clock semantics | Confirming the wizard writes `activeStartedAt`/`preflightCompletedAt`/`startedAt` server-side; the deadline is `activeStartedAt + durationMinutes`. Exams with `requiresPreflight=false` start at join. Countdown and answers read the server clock |
+| Deadline stop | `PUT answers` returns `409` after the deadline; `AttemptExpiryService` runs every 15 s, row-locks due `IN_PROGRESS` attempts, marks them `SUBMITTED` with `autoSubmitted`, keeps every saved revision and runs the same grading/code-judge path. Idempotent and safe alongside a manual submit |
+| Integrity signals | The runtime watcher reports `FULLSCREEN_EXIT`, `NETWORK_LOST` and `NETWORK_RESTORED`; the wizard can record `GAZE_AWAY/RETURN`, `CAMERA_LOST`, `NOISE_HIGH`. These are review-only — only `FOCUS_LOSS` strikes |
+| Staff surfaces | Settings switches for both features; the attempts table shows the real timer start (with join time), a "Time up" chip for auto-submits, and **View photo** opens the stored photo plus the check values. The student's results stay gated on release, unchanged |
+| Mail | Compose runs Mailpit (SMTP 1025, inbox <http://localhost:8025>); `MAIL_ENABLED` defaults to true there and false in the production compose. Delivery failures are reported per recipient and never block issuance |
+| Tests | `PinPreflightApiTest` covers PIN issuance/rotation/throttle/owner-only, signed-in students still needing the PIN, preflight gating and idempotency, deadline rejection plus expiry auto-submit, and the no-wizard exam starting at join |
+
+### Verification against the compose stack (2026-11-21)
+
+| Check | Result |
+| --- | --- |
+| Backend | 120 tests on H2, 0 failures, 1 skipped (includes `PinPreflightApiTest` 7/7) |
+| Flyway on the existing MySQL volume | `5 exam pin preflight` applied with `success=1`; `requires_pin` defaults `b'0'`, `requires_preflight` `b'1'`, and the preflight/`active_started_at` columns exist |
+| Compose | Backend, frontend, AI, runner, MySQL and the new Mailpit container all healthy |
+| Demo refresh | The volume was seeded before V5 and its `DEMO-103` window had closed on 2026-11-15, which blocked joins. `DemoDataSeeder.refreshDemoExams` now re-applies the known PIN/preflight flags and extends an expired demo window on startup, so the scripted flow stays joinable |
+| Playwright (compose, Chrome, fake camera/mic) | 6/6 in 2.9 min: coding submit→judge 3/3, typed join with PIN→six-step preflight→submit→grading, three focus losses terminate, released PDF report, CSV/PDF exports, admin findings plus overview PDF |
+| Mailpit | Issuing a PIN on `DEMO-103` delivered "Your ExamGuard PIN for DEMO-103" to `student@examguard.local` from `no-reply@examguard.local`; the seeded hash was restored afterwards |
+| Frontend | ESLint clean, `tsc --noEmit` clean, 91 unit tests across 26 files, production bundle 362.9 kB gzip (budget 420 kB) |
+
 ## 2. Known gaps
 
 - The CD deploy job is written but has never touched a VPS; `scripts/deploy.sh` was only syntax
@@ -225,6 +251,16 @@ Measured on this pass (Windows 11, Docker Desktop 29.9.2, compose stack on non-d
   resumable attempt. Scheduling is enforced only when a new attempt is created.
 - Roster membership is matched on the account email; a guest student (no account) cannot join a
   rostered exam even with the exam code. That is the intended trade-off for exams that need a roster.
+- Gaze detection is a **heuristic**, not proctoring-grade: it uses the browser `FaceDetector` API
+  where present (Chromium) and otherwise attests the student's confirmation. There is no liveness or
+  identity-match check, and the camera is released after the photo. Present it as a supervised
+  check-in, not face recognition.
+- The pre-exam photo is stored as a data URL in `attempt.profile_photo` until the exam is deleted.
+  It is PII: define a retention/deletion policy before a real deployment.
+- The PIN throttle is in-memory per backend instance, like the login throttle. A multi-replica
+  deployment needs a shared store for a hard limit.
+- PIN emails require a configured SMTP relay. With mail off, the lecturer must read the one-time PIN
+  from the issue response and distribute it; `failedRecipients` lists addresses that bounced.
 - Closing an MUI dialog logs one Chrome warning about `aria-hidden` on the focused element while focus
   is restored (MUI 5 internal ordering). It is a warning, not an error, and the axe focus assertions
   pass; no page functionality is affected.
@@ -283,6 +319,9 @@ cd extension && npm test && npm run typecheck && npm run build
 
 # with docker compose up -d --wait:
 cd frontend  && npm run test:e2e     # PLAYWRIGHT_BASE_URL defaults to http://localhost:5173
+# The e2e run walks the PIN join (demo PIN 246810) and the six pre-exam steps using Chromium's
+# fake camera/microphone plus e2e/fixtures/silence.wav, so the noise check reads a quiet room.
+# Set PLAYWRIGHT_CHANNEL=chrome to use an installed Chrome instead of the bundled Chromium.
 ```
 
 Training (optional learned fusion and authorship) and Kaggle:
