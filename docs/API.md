@@ -1,7 +1,8 @@
 # HTTP API
 
 Base path `/api`. JSON only. Staff endpoints require `Authorization: Bearer <staff token>`.
-Candidate endpoints require an attempt token from `/public/join`. Error shape:
+Candidate endpoints require an attempt token from `/public/join`; student-account endpoints require
+the token from `/student/auth/login` (`role=STUDENT`, `scope=ACCOUNT`). Error shape:
 
 ```json
 { "timestamp": "2026-11-01T10:00:00Z", "status": 400, "error": "Bad Request",
@@ -35,6 +36,12 @@ Returns the same `user` object.
 ```json
 { "examCode": "DEMO-101", "candidateCode": "C001" }
 ```
+Creating a new attempt needs only the two codes, subject to the exam window and roster. Resuming an
+existing attempt needs `"resumeToken": "<attempt jwt from the first join>"`; this endpoint is
+permit-all and ignores `Authorization`. Anything else returns 403 `A resume token is required to
+continue this attempt`, and a token for another attempt returns 403 as well. A signed-in student
+resumes by account instead through `POST /student/attempts/join`. An in-progress attempt stays
+resumable after `closesAt`.
 ```json
 {
   "attemptId": 1,
@@ -112,6 +119,50 @@ Duplicates are detected by `(attemptId, clientEventId)`. Events outside the atte
 ```json
 { "coverageStart": "...", "lastSeenAt": "...", "eventCount": 14,
   "domainsObserved": 3, "extensionConnected": true }
+```
+
+### `POST /attempts/{attemptId}/integrity/signals`
+```json
+{ "episodeKey": "focus-1719", "signal": "FOCUS_LOSS",
+  "occurredAt": "2026-11-01T09:20:00Z", "clientSeq": 4 }
+```
+```json
+{ "strikeCount": 2, "maxStrikes": 3, "terminated": false, "status": "IN_PROGRESS" }
+```
+`signal` is `FOCUS_LOSS`, `FOCUS_RETURN` or `VISIBILITY_HIDDEN`. Signals are de-duplicated by
+`(attemptId, episodeKey)`, so a retried report never adds a strike. The `maxStrikes`-th `FOCUS_LOSS`
+returns `terminated: true` with `status: "TERMINATED"`, auto-grades the saved answers and later saves
+or submits return `409`.
+
+## Student accounts
+
+Register once, then sign in through the student portal. The returned token carries `role=STUDENT` and
+`scope=ACCOUNT`; it cannot be used on staff endpoints.
+
+### `POST /student/auth/register`
+```json
+{ "email": "c001@students.example", "password": "ChangeMe123!", "displayName": "Candidate One" }
+```
+`201` with `{ "token": "<jwt>", "user": { "id": 5, "email": "...", "displayName": "..." } }`.
+Email is unique (`409`), password 8–100 characters.
+
+### `POST /student/auth/login`
+Same body shape as staff login, same response as register. Repeated failures for one address are
+throttled.
+
+### `GET /student/me`
+Returns the signed-in `user` object.
+
+### `POST /student/attempts/join`
+Same request and response as `POST /public/join`; the attempt is linked to the signed-in account, and
+the roster is checked against that account's email. The account is proof of ownership, so an attempt
+already linked to it resumes without `resumeToken`; one linked to a different account returns `403`.
+
+### `GET /student/attempts`
+```json
+[ { "attemptId": 1, "examCode": "DEMO-101", "examTitle": "Demo Examination",
+    "status": "SUBMITTED", "startedAt": "...", "submittedAt": "...",
+    "scorePoints": 14.5, "maxPoints": 20, "released": true, "strikes": 1 } ]
 ```
 
 ## Exams (staff)

@@ -20,9 +20,11 @@ uses `docker-compose.prod.yml` and pulls immutable images from GHCR.
    git tag -a v1.0.0 -m "ExamGuard 1.0.0"
    git push origin v1.0.0
    ```
-3. The **CD** workflow publishes
-   `ghcr.io/<owner>/examguard-{backend,ai,frontend}:v1.0.0` (plus `1.0`, `1.0.0`, `latest`
-   and a short SHA tag) and creates a GitHub release with the unpacked extension zip.
+3. The **CD** workflow first waits (up to 25 minutes) for every CI job to succeed on the tagged
+   commit, then publishes
+   `ghcr.io/<owner>/examguard-{backend,ai,frontend,runner}:v1.0.0` (plus `1.0`, `1.0.0` and a
+   short SHA tag) and creates a GitHub release with the unpacked extension zip. The `latest` tag is
+   only moved by a full release; a prerelease such as `v1.1.0-rc1` publishes only its version tags.
 4. Deploy:
    ```bash
    ssh deploy@examguard-host
@@ -66,6 +68,27 @@ GitHub secrets for the optional deploy job:
 Only the frontend port. MySQL, the AI service and the backend are on the compose network.
 `frontend/nginx.conf` proxies `/api/` to `backend:8080`, so the browser never talks to the backend
 directly and CORS stays closed by default.
+
+## Code runner
+
+The `runner` service executes submitted code and is never exposed: it joins `runner_net` (marked
+`internal: true`, so the container has no egress) and publishes no host port. The backend is the only
+client, at `http://runner:8000`.
+
+Both the `runner` and `backend` containers must receive the same `RUNNER_TOKEN`. Compose refuses to
+start when it is unset `${RUNNER_TOKEN:?…}`. The runner fails closed:
+
+| Condition | Response |
+| --- | --- |
+| `RUNNER_TOKEN` unset inside the runner | `503` on every `/run` |
+| Header missing or wrong | `401` |
+| Every execution slot busy | `429` with `Retry-After: 5` |
+| Authorized run | result, capped at 75 s wall time |
+
+Without a reachable runner, submit still succeeds and coding answers stay ungraded; they are never
+scored as zero. Start the runner and use **Re-run code judging**, or let the backend do it on the
+next submit. The runner's isolation is process-level (non-root, read-only rootfs, rlimits, no
+egress); it is not a proven security boundary for hostile code. Keep it internal-only.
 
 ## Rollback
 
@@ -153,12 +176,16 @@ The deployment then uses rule weights and the response reports the rule fusion m
 ### 3. Vercel
 
 Import the repository, set the root directory to `frontend`, and keep the Vite preset. `vercel.json`
-rewrites every path to `index.html` so client-side routes survive a refresh.
+rewrites every path to `index.html` so client-side routes survive a refresh. It does **not** proxy
+`/api`, so a relative base would silently hit the static site.
 
 | Variable | Value |
 | --- | --- |
-| `VITE_API_BASE_URL` | `https://examguard-api.onrender.com` |
+| `VITE_API_BASE` | `https://examguard-api.onrender.com/api` (absolute; must include `/api`) |
 | `VITE_DEFAULT_EXAM_CODE` | optional, join-page default |
+
+`VITE_API_BASE` is read at build time (`frontend/src/api/client.ts`), so set it before deploying and
+rebuild after changing it. The default is `/api`, which is only correct behind the nginx proxy.
 
 The browser calls the API cross-origin in this topology, so the API's `CORS_ALLOWED_ORIGINS` must
 contain the exact Vercel origin (preview deployments included, if you use them).

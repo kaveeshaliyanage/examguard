@@ -40,7 +40,7 @@ model's job.
 | `.github/workflows/` | GitHub Actions | Complete: test jobs (backend, PostgreSQL, AI, AI evaluation gates, runner, frontend bundle budget, extension), compose smoke with Playwright, GHCR image publishing on tags, optional VPS deploy |
 | `kaggle/` | Kaggle CLI | Complete: private dataset, offline training notebook, model storage |
 
-Tests: 105 backend, 40 AI, 83 frontend, 19 runner, 13 extension. The AI suite includes a 100-candidate
+Tests: 113 backend, 61 AI, 90 frontend, 23 runner, 13 extension. The AI suite includes a 100-candidate
 timing benchmark and an export/training/inference consistency check.
 
 ## Quick start with Docker
@@ -69,12 +69,13 @@ Demo accounts created on first start:
 | Reviewer | reviewer@examguard.local | Reviewer123! |
 | Student | student@examguard.local | Student123! |
 
-Two demo exams are seeded:
+Three demo exams are seeded (`SEED_DEMO_DATA=true`):
 
 | Exam | Content |
 | --- | --- |
 | `DEMO-101` | Candidate codes `C001` ... `C008` for pair and incident review. |
 | `DEMO-102` | Five typed questions (one of each type), two scripted candidates and a released result for `C101`. |
+| `DEMO-103` | Three coding questions judged by the runner, with a released attempt and an awaiting one; `student@examguard.local` is enrolled. |
 
 ## Demo flow
 
@@ -124,14 +125,15 @@ pip install -r requirements-dev.txt
 python -m uvicorn app.main:app --reload --port 8000
 
 # 2b. code runner (needed for coding questions; backend defaults to http://localhost:8001)
+#     The runner fails closed without RUNNER_TOKEN; the backend must send the same value.
 cd runner
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn app.main:app --port 8001
+RUNNER_TOKEN=dev-runner-token python -m uvicorn app.main:app --port 8001
 
 # 3. backend
 cd backend
-JWT_SECRET=dev-only-secret-change-me-0123456789abcdef mvn spring-boot:run
+JWT_SECRET=$(openssl rand -hex 32) RUNNER_TOKEN=dev-runner-token mvn spring-boot:run
 
 # 4. frontend
 cd frontend
@@ -150,7 +152,8 @@ Tests and checks:
 ```bash
 cd backend   && mvn test
 cd ai        && pytest -q && python -m app.evaluation.run_eval
-cd frontend  && npm test && npm run typecheck && npm run build
+cd runner    && pip install -r requirements-dev.txt && pytest -q
+cd frontend  && npm run lint && npm test && npm run typecheck && npm run build && npm run budget
 cd extension && npm test && npm run typecheck && npm run build
 ```
 
@@ -161,8 +164,9 @@ because the manifest deliberately keeps `host_permissions` empty.
 ## Configuration
 
 All backend configuration is environment driven; see [`.env.example`](.env.example).
-`JWT_SECRET` must be at least 32 bytes. Schema changes are Flyway migrations only; production
-profiles use `ddl-auto: validate` and never `update`. Frontend build-time variables are documented
+`JWT_SECRET` must be at least 32 bytes, and `RUNNER_TOKEN` must be the same in the `backend` and
+`runner` containers (the runner answers 503 on `/run` when it is unset). Schema changes are Flyway
+migrations only; production profiles use `ddl-auto: validate` and never `update`. Frontend build-time variables are documented
 in [`frontend/.env.example`](frontend/.env.example).
 
 ## Deliberately out of scope

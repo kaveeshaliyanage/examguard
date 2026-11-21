@@ -153,6 +153,35 @@ frontend: tsc --noEmit          -> clean
 frontend: vite build + budget   -> 350.7 kB gzip (budget 420 kB)
 ```
 
+## 1e. Production-readiness pass
+
+| Change | Behaviour |
+| --- | --- |
+| Resuming needs proof | `POST /public/join` on an existing attempt requires the attempt token issued by the first join, or a signed-in student account that owns the attempt. Wrong or absent proof is `403`, closing the code-alone takeover. The frontend sends the token it already stores for the same exam + candidate codes |
+| Submit refuses unsaved answers | The autosave `flushAll` re-checks every entry after the final flush and throws when one is halted or not up to date, so the editor reports "Some answers could not be saved" instead of submitting a partial attempt |
+| Runner is authenticated | `/run` requires `X-Runner-Token` (503 when unset, 401 on mismatch, `/health` stays open); compose passes the same `RUNNER_TOKEN` to `runner` and `backend` |
+| Runner sheds load | A non-blocking slot acquire returns `429 Retry-After: 5`; the total budget is 75 s (below the backend's 90 s read timeout) and every language gets `RLIMIT_CPU` |
+| Secure defaults | No baked-in JWT secret, `SEED_DEMO_DATA` defaults to `false`, and error responses carry no message, binding errors or stack trace |
+| Keyboard table rows | Clickable `DataTable` rows are focusable and respond to Enter/Space, with a visible focus ring |
+| Pipeline gates | CI runs read-only with per-job timeouts and an ESLint step; CD refuses to publish unless the tagged commit's CI jobs succeeded, and a prerelease tag does not move `latest` |
+| Same-origin proxy | nginx clears `Origin` before proxying `/api`, so the browser's same-origin calls are not re-checked by Spring CORS against a host missing from `CORS_ALLOWED_ORIGINS` (previously every proxied POST answered `403 Invalid CORS request` on a custom port) |
+
+### Verification (2026-11-21)
+
+Measured on this pass (Windows 11, Docker Desktop 29.9.2, compose stack on non-default host ports):
+
+| Suite | Result |
+| --- | --- |
+| Backend (H2) | 113 tests, 0 failures, 1 skipped |
+| Backend (PostgreSQL 16, Flyway plus `ddl-auto: validate`) | 113 tests, 0 failures, 0 skipped |
+| AI | 61 tests, 0 failures |
+| Runner (inside the image) | 23 tests, 0 failures |
+| Frontend | ESLint clean, `tsc --noEmit` clean, 90 tests across 26 files, production bundle 351.3 kB gzip (budget 420 kB) |
+| Extension | typecheck clean, 13 tests, production build OK |
+| Compose stack | MySQL, AI, runner, backend and frontend all healthy; an authenticated runner run returns `200` and a missing token `401` |
+| Playwright (compose, Chrome) | 6/6: coding submit then judge 3/3 passed, exam flow three times, CSV and PDF export, admin findings plus overview PDF |
+| Manual walkthrough | lecturer tabs and the disabled release gate with 10 ungraded answers; CODE authoring form; locked student row toast; report `403` before release and no review signals after; admin findings filters, run history and audit trail |
+
 ## 2. Known gaps
 
 - The CD deploy job is written but has never touched a VPS; `scripts/deploy.sh` was only syntax
@@ -180,6 +209,15 @@ frontend: vite build + budget   -> 350.7 kB gzip (budget 420 kB)
 - The demo seeder uses scripted content. It is not evidence about real people.
 - Rejoining a *submitted* attempt returns 409; only in-progress attempts resume. This is intentional
   but the student page shows a generic error for that case.
+- Resuming an in-progress attempt now requires proof (the stored attempt token, or the signed-in
+  account the attempt was joined with). A candidate who loses the tab **and** the browser session
+  cannot resume anonymously; they must sign in or ask an invigilator. That is the deliberate
+  trade-off for closing the takeover gap. `POST /public/join` returns 403 with a resume-specific
+  message, and the join page explains it.
+- Compose now requires `RUNNER_TOKEN`; an existing local `.env` copied before this change must add
+  it (`.env.example` has a placeholder) or `docker compose up` refuses to start.
+- `runner/requirements*.txt` are hash-pinned for CPython 3.12 on linux/x86_64 and are meant to be
+  installed inside the runner image. Installing them on a Windows host will fail hash verification.
 - Duration is evaluated when an attempt is **submitted**, so shortening `durationMinutes` mid-exam does
   not move a running countdown; it only changes what counts as late. The settings form says so.
 - `upcoming` deliberately omits an `attemptId`: exams with any attempt (including in-progress) are
