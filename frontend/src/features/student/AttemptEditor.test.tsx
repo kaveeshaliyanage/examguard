@@ -123,6 +123,7 @@ describe('AttemptEditor integrity monitoring', () => {
 
     expect(await screen.findByText(/Some answers could not be saved/i)).toBeInTheDocument();
     expect(submits).toBe(0);
-    expect(screen.getByRole('button', { name: 'Submit exam' })).toBeInTheDocument();
+    // The confirm dialog closes on the failed submit; the page button is only reachable after it unmounts.
+    expect(await screen.findByRole('button', { name: 'Submit exam' }, { timeout: 3000 })).toBeInTheDocument();
   }, 60000);
 });

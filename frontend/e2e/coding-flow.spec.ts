@@ -18,9 +18,10 @@ test('student submits a coding answer and the judge marks every test', async ({ 
   const candidateCode = `E2E${Date.now().toString().slice(-8)}`;
 
   await signInStudent(page);
-  await page.getByLabel('Exam code').fill('DEMO-103');
-  await page.getByLabel('Candidate code').fill(candidateCode);
-  await page.getByRole('button', { name: 'Join', exact: true }).click();
+  const joinCard = page.locator('form').filter({ has: page.getByLabel('Exam code') });
+  await joinCard.getByLabel('Exam code').fill('DEMO-103');
+  await joinCard.getByLabel('Candidate code').fill(candidateCode);
+  await joinCard.getByRole('button', { name: 'Join', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Coding \(DSA\)/ })).toBeVisible({
     timeout: 45_000,
   });
