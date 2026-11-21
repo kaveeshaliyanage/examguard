@@ -30,6 +30,8 @@ interface Draft {
   instructions: string;
   opensAt: string;
   closesAt: string;
+  requiresPin: boolean;
+  requiresPreflight: boolean;
   rules: CreateRuleInput[];
 }
 
@@ -43,6 +45,8 @@ function draftFromExam(exam: ExamDetail): Draft {
     instructions: exam.instructions ?? '',
     opensAt: toDateTimeLocalValue(exam.opensAt),
     closesAt: toDateTimeLocalValue(exam.closesAt),
+    requiresPin: exam.requiresPin,
+    requiresPreflight: exam.requiresPreflight,
     rules: exam.resourceRules.map((rule) => ({
       category: rule.category,
       domainPattern: rule.domainPattern,
@@ -65,6 +69,8 @@ function toPayload(draft: Draft): UpdateExamInput {
     instructions: draft.instructions.trim() || null,
     opensAt: fromDateTimeLocalValue(draft.opensAt),
     closesAt: fromDateTimeLocalValue(draft.closesAt),
+    requiresPin: draft.requiresPin,
+    requiresPreflight: draft.requiresPreflight,
     resourceRules: draft.rules.map((rule) => ({
       category: rule.category,
       domainPattern: rule.domainPattern.trim(),
@@ -222,6 +228,26 @@ export function ExamSettingsForm({ exam, canManage }: ExamSettingsFormProps) {
             />
           }
           label="Allow the monitoring extension (domain-only observations)"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={draft.requiresPreflight}
+              onChange={(event) => patch({ requiresPreflight: event.target.checked })}
+              disabled={!canManage}
+            />
+          }
+          label="Require pre-exam checks and an identity photo before the timer starts"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={draft.requiresPin}
+              onChange={(event) => patch({ requiresPin: event.target.checked })}
+              disabled={!canManage}
+            />
+          }
+          label="Require the exam PIN for new joins (issue it from the PIN card)"
         />
 
         <RuleFields

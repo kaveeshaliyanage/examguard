@@ -30,6 +30,9 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
 
     List<Attempt> findByExamIdAndGradedAtIsNotNull(Long examId);
 
+    @Query("select a from Attempt a join fetch a.exam where a.status = :status and a.activeStartedAt is not null")
+    List<Attempt> findRunningWithExam(@Param("status") AttemptStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Attempt a where a.id = :id")
     Optional<Attempt> findByIdForUpdate(@Param("id") Long id);

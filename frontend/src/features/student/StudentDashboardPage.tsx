@@ -124,6 +124,7 @@ function JoinByCodeCard({ token, examCode, onExamCodeChange }: JoinByCodeCardPro
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [candidateCode, setCandidateCode] = useState('');
+  const [accessPin, setAccessPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -132,7 +133,12 @@ function JoinByCodeCard({ token, examCode, onExamCodeChange }: JoinByCodeCardPro
     setError(null);
     setBusy(true);
     try {
-      const response = await joinStudentExam(token, examCode.trim(), candidateCode.trim());
+      const response = await joinStudentExam(
+        token,
+        examCode.trim(),
+        candidateCode.trim(),
+        accessPin.trim(),
+      );
       writeAttemptSession({
         attemptId: response.attemptId,
         sessionToken: response.sessionToken,
@@ -155,7 +161,8 @@ function JoinByCodeCard({ token, examCode, onExamCodeChange }: JoinByCodeCardPro
         <Box>
           <Typography variant="h6" component="h5">Join an exam</Typography>
           <Typography variant="body2" color="text.secondary">
-            Enter the exam code from your invigilator and your candidate code.
+            Enter the exam code from your invigilator, your candidate code and the six-digit PIN sent
+            to your email.
           </Typography>
         </Box>
         {error ? <Alert severity="error">{error}</Alert> : null}
@@ -175,6 +182,14 @@ function JoinByCodeCard({ token, examCode, onExamCodeChange }: JoinByCodeCardPro
             required
             fullWidth
             autoComplete="off"
+          />
+          <TextField
+            label="Exam PIN"
+            value={accessPin}
+            onChange={(event) => setAccessPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            fullWidth
+            autoComplete="one-time-code"
+            inputProps={{ inputMode: 'numeric', maxLength: 6 }}
           />
           <Button type="submit" variant="contained" disabled={busy} sx={{ flexShrink: 0, height: 40 }}>
             {busy ? 'Joining…' : 'Join'}

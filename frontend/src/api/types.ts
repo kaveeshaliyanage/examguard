@@ -10,7 +10,16 @@ export type QuestionType =
   | 'CODE';
 export type CodeLanguage = 'PYTHON' | 'JAVASCRIPT' | 'JAVA';
 export type GradingMode = 'AUTO' | 'MANUAL';
-export type IntegritySignal = 'FOCUS_LOSS' | 'FOCUS_RETURN';
+export type IntegritySignal =
+  | 'FOCUS_LOSS'
+  | 'FOCUS_RETURN'
+  | 'FULLSCREEN_EXIT'
+  | 'GAZE_AWAY'
+  | 'GAZE_RETURN'
+  | 'CAMERA_LOST'
+  | 'NOISE_HIGH'
+  | 'NETWORK_LOST'
+  | 'NETWORK_RESTORED';
 export type FindingType = 'CANDIDATE_PAIR' | 'CANDIDATE_INCIDENT' | 'CANDIDATE_AUTHORSHIP';
 export type FindingStatus = 'OPEN' | 'CONFIRMED' | 'DISMISSED' | 'NEEDS_INFO' | 'ESCALATED' | 'SUPERSEDED';
 export type PriorityBand = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -155,6 +164,11 @@ export interface ExamDetail {
   enrollmentCount: number;
   releasedCount: number;
   awaitingReleaseCount: number;
+  requiresPin: boolean;
+  pinConfigured: boolean;
+  pinIssuedAt: string | null;
+  pinSentAt: string | null;
+  requiresPreflight: boolean;
   questions: ExamQuestion[];
   resourceRules: RuleView[];
   permissions: PermissionView[];
@@ -175,6 +189,8 @@ export interface UpdateExamInput {
   instructions: string | null;
   opensAt: string | null;
   closesAt: string | null;
+  requiresPin: boolean;
+  requiresPreflight: boolean;
   resourceRules: CreateRuleInput[];
 }
 
@@ -183,8 +199,12 @@ export interface AttemptSummary {
   candidateCode: string;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
   submittedAt: string | null;
   lastSeenAt: string | null;
+  preflightCompletedAt: string | null;
+  autoSubmitted: boolean;
+  hasPhoto: boolean;
   answerCount: number;
   eventCount: number;
   coveragePercent: number;
@@ -341,6 +361,10 @@ export interface JoinResponse {
   collectorToken: string;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
+  preflightCompletedAt: string | null;
+  requiresPreflight: boolean;
+  autoSubmitted: boolean;
   submittedAt: string | null;
   serverNow: string;
   extensionConnected: boolean;
@@ -352,6 +376,10 @@ export interface AttemptState {
   attemptId: number;
   status: AttemptStatus;
   startedAt: string;
+  activeStartedAt: string | null;
+  preflightCompletedAt: string | null;
+  requiresPreflight: boolean;
+  autoSubmitted: boolean;
   submittedAt: string | null;
   lastSeenAt: string | null;
   serverNow: string;
@@ -414,8 +442,50 @@ export interface CreateExamInput {
   instructions: string | null;
   opensAt: string | null;
   closesAt: string | null;
+  requiresPin?: boolean;
+  requiresPreflight?: boolean;
   questions: CreateQuestionInput[];
   resourceRules: CreateRuleInput[];
+}
+
+export interface PreflightPayload {
+  fullscreen: boolean;
+  connectionOk: boolean;
+  deviceOk: boolean;
+  micOk: boolean;
+  noiseOk: boolean;
+  cameraOk: boolean;
+  faceDetected: boolean;
+  gazeOnScreen: boolean;
+  noiseLevel: string | null;
+  photoDataUrl: string;
+  checks: Record<string, unknown>;
+}
+
+export interface PreflightResult {
+  completedAt: string;
+  activeStartedAt: string;
+  deadlineAt: string;
+  durationMinutes: number;
+  serverNow: string;
+}
+
+export interface AttemptPreflight {
+  completedAt: string;
+  photoTakenAt: string | null;
+  photoDataUrl: string | null;
+  checks: Record<string, unknown> | null;
+}
+
+export interface ExamPinResult {
+  pin: string;
+  recipients: number;
+  emailed: number;
+  failedRecipients: string[];
+  issuedAt: string;
+  sentAt: string | null;
+  requiresPin: boolean;
+  mailConfigured: boolean;
 }
 
 export interface IntegritySignalResponse {

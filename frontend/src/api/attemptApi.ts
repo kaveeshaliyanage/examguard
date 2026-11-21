@@ -4,6 +4,8 @@ import type {
   IntegritySignal,
   IntegritySignalResponse,
   JoinResponse,
+  PreflightPayload,
+  PreflightResult,
   SaveAnswerResponse,
   SubmitResponse,
 } from './types';
@@ -39,15 +41,45 @@ function isIntegritySignalResponse(value: unknown): boolean {
   );
 }
 
+export interface JoinOptions {
+  accessPin?: string;
+  resumeToken?: string;
+}
+
 export function joinExam(
   examCode: string,
   candidateCode: string,
-  resumeToken?: string,
+  options: JoinOptions = {},
 ): Promise<JoinResponse> {
+  const body: Record<string, string> = { examCode, candidateCode };
+  if (options.accessPin?.trim()) {
+    body.accessPin = options.accessPin.trim();
+  }
+  if (options.resumeToken) {
+    body.resumeToken = options.resumeToken;
+  }
   return request<JoinResponse>('/public/join', {
     method: 'POST',
-    body: resumeToken ? { examCode, candidateCode, resumeToken } : { examCode, candidateCode },
+    body,
     validate: isJoinResponse,
+  });
+}
+
+export function completePreflight(
+  attemptId: number,
+  token: string,
+  payload: PreflightPayload,
+): Promise<PreflightResult> {
+  return request<PreflightResult>(`/attempts/${attemptId}/preflight`, {
+    method: 'POST',
+    token,
+    scope: 'attempt',
+    body: payload,
+    validate: (value) =>
+      isRecord(value) &&
+      typeof value.completedAt === 'string' &&
+      typeof value.activeStartedAt === 'string' &&
+      typeof value.deadlineAt === 'string',
   });
 }
 

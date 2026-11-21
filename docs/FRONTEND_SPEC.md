@@ -34,10 +34,11 @@ extension contribute **domain-only** observations. It must never imply that a sc
 | `/exams/:id` | Staff | Overview, attempts, runs, findings, grading, settings |
 | `/exams/:id/audit` | Staff | Audit trail |
 | `/findings/:id` | Reviewer | Evidence detail and decision |
-| `/join` | Student | Enter exam code + candidate code |
+| `/join` | Student | Enter exam code, candidate code and the six-digit exam PIN when the exam requires one |
 | `/student` | Student account | Signed-in student dashboard: stats, upcoming exams, attempts |
-| `/attempt/:attemptId` | Student | Answer questions, autosave, timer, submit |
+| `/attempt/:attemptId` | Student | Answer questions, autosave, deadline countdown, submit |
 | `/attempt/:attemptId/instructions` | Student | Pre-exam instructions and extension setup |
+| `/attempt/:attemptId/preflight` | Student | Supervised pre-exam window: full screen, connection, device, mic/noise, camera/gaze, identity photo |
 | `/attempt/:attemptId/submitted` | Student | Receipt and safe close |
 | `/attempt/:attemptId/report` | Student account | Report (403 until released) |
 
@@ -111,8 +112,11 @@ Tabs:
    extension allowance, latest run summary. Copy notes that the schedule blocks **new joins only**;
    attempts already in progress can resume.
 2. **Attempts** — `GET /exams/:id/attempts` via `DataTable` with URL-synced sorting/filter/page;
-   candidate code, status, started/submitted time, answer count, event count, coverage percent,
-   coverage warning, late flag. Coverage < 60% shows a warning chip, not a red "cheating" chip.
+   candidate code, status, preflight start and deadline (`activeStartedAt`), submitted time, answer
+   count, event count, coverage percent, coverage warning, late flag, auto-submitted flag and an
+   **Identity photo** action that opens a dialog with the stored photo and the preflight checks
+   (`GET /exams/{id}/attempts/{attemptId}/preflight`). Coverage < 60% shows a warning chip, not a
+   red "cheating" chip.
 3. **Findings** — `GET /exams/:id/findings`; filter by type and status. Two sub-tabs: **Pairs** and
    **Incidents**. Both sorted by priority descending. Row: band chip, score, candidates, summary,
    coverage icon, evidence count, status. Click opens `/findings/:id`.
@@ -126,9 +130,14 @@ Tabs:
    result chips from `detail` (passed / failed / compile error, duration, hidden flag). A **Re-run
    code judging** button calls `POST /exams/{id}/code-judge`; it never overwrites a hand-marked score.
 6. **Settings** — fully editable settings form (title, description, duration, allowExtension,
-   maxStrikes, instructions, schedule, resource rules), an **UnsavedChangesGuard** while dirty, and a
-   **Results** card showing `releasedCount`/`awaitingReleaseCount` with a link to grading. Also:
-   status transitions, permissions (owner/admin), roster management and the audit link.
+   maxStrikes, requiresPin, requiresPreflight, instructions, schedule, resource rules), an
+   **UnsavedChangesGuard** while dirty, and a **Results** card showing
+   `releasedCount`/`awaitingReleaseCount` with a link to grading. An **Access PIN** card shows
+   `pinConfigured`/`pinIssuedAt`/`pinSentAt` and an **Issue PIN and email roster** button
+   (`POST /exams/{id}/pin`): the returned six-digit PIN is shown once for handover, with the
+   recipient/emailed counts and any failed addresses; issuing again rotates the PIN. Only new joins
+   use the PIN, so rotation never strands an attempt that already has a token. Also: status
+   transitions, permissions (owner/admin), roster management and the audit link.
 
 Run analysis: `POST /exams/:id/analysis-runs`. Show a blocking progress panel because the endpoint is
 synchronous; on failure show the returned run error and keep previous findings visible.
@@ -214,18 +223,43 @@ Rows in the results table whose marks are not released stay locked: clicking one
 
 ### 5.2 Join `/join`
 
-Fields: exam code (prefill from `VITE_DEFAULT_EXAM_CODE` or from the upcoming card), candidate code.
-Submit `POST /api/public/join`. Store the attempt token in `sessionStorage` under
-`examguard.attempt.<attemptId>` and navigate to `/attempt/:attemptId`. Handle 409 with a clear
-"already submitted" screen and 401 with a "codes not accepted" screen; a roster refusal (403) explains
-that the account is not enrolled, and a schedule refusal (409) shows the opens/closes time. Never
-store the token in a URL.
+Fields: exam code (prefill from `VITE_DEFAULT_EXAM_CODE` or from the upcoming card), candidate code,
+and the six-digit exam PIN. The PIN input accepts digits only; it is optional in the form so exams
+without a PIN still join. Submit `POST /api/public/join`. Store the attempt token in
+`sessionStorage` under `examguard.attempt.<attemptId>` and navigate to `/attempt/:attemptId`
+(instructions). Handle 409 with a clear "already submitted" screen, 409 "PIN not issued" with a
+"wait for your lecturer" message, 403 "PIN not accepted", 429 "too many attempts, wait ten minutes",
+and 401 with a "codes not accepted" screen; a roster refusal (403) explains that the account is not
+enrolled, and a schedule refusal (409) shows the opens/closes time. Never store the token in a URL.
 
-### 5.3 Exam `/attempt/:attemptId`
+### 5.3 Pre-exam window `/attempt/:attemptId/preflight`
+
+Shown only while `requiresPreflight` is true and `preflightCompletedAt` is null. Six steps, each
+gated by its check:
+
+1. **Full screen** — `requestFullscreen` on the document; leaving full screen later is reported as a
+   non-strike `FULLSCREEN_EXIT` signal. Browsers without the API show a warning and pass.
+2. **Internet** — `GET /health` with an 8 s timeout and a round-trip time.
+3. **Device** — at least 2 CPU cores and a 1024×600 screen, plus an explicit "plugged in, screen
+   readable, other apps closed" acknowledgement.
+4. **Microphone and room noise** — `getUserMedia({audio})`, 2 s of RMS sampling; quiet means
+   ≤ −38 dBFS. The microphone is released as soon as the sample ends.
+5. **Camera and gaze** — `getUserMedia({video})` preview plus `FaceDetector` polling (face centred
+   and large enough). Without `FaceDetector`, the student ticks an attestation instead.
+6. **Photo** — 3 s countdown, 640×480 JPEG captured from the video element and shown for review.
+
+**Confirm and start the timer** posts every verdict, the diagnostics and the photo to
+`POST /attempts/:attemptId/preflight`; the server stamps `preflightCompletedAt`/`activeStartedAt` and
+the deadline. The camera and microphone are released before navigating to the attempt. The wizard
+re-posts safely if the confirmation request fails.
+
+### 5.4 Exam `/attempt/:attemptId`
 
 - Header: exam title, candidate code, countdown, save indicator, extension status.
-- Countdown uses `startedAt + durationMinutes` with a server-time offset captured from the join
-  response. Warn at 5 minutes. At zero, submit automatically once; show a blocking receipt.
+- Countdown uses `deadlineAt` (preflight confirmation) or `startedAt + durationMinutes` for legacy
+  exams, with the server-time offset from the response. Warn at 5 minutes. At zero the page stops
+  editing, and the server rejects further saves and auto-submits what was saved; show a blocking
+  receipt that distinguishes an automatic deadline submission.
 - Questions are a vertical list or a step navigation on mobile. Autosize textarea, word counter from
   `maxWords`, no rich text.
 - `CODE` questions use the same `CodeEditor` seeded with the starter code. The text is saved exactly
@@ -239,7 +273,7 @@ store the token in a URL.
   success clear the draft and show the receipt. If the request fails, keep the attempt open.
 - Rejoin calls `GET /attempts/:attemptId`, restoring answers and showing a "resumed" toast.
 
-### 5.4 Extension connection panel
+### 5.5 Extension connection panel
 
 The attempt page shows **Connect monitoring extension** with:
 
@@ -252,7 +286,7 @@ The attempt page shows **Connect monitoring extension** with:
 The extension popup accepts API base URL + collector token. No page-to-extension messaging is
 required; this keeps the extension ID out of the security boundary and works with an unpacked build.
 
-### 5.5 Report `/attempt/:attemptId/report`
+### 5.6 Report `/attempt/:attemptId/report`
 
 Score ring, per-question marks, integrity timeline and review-aid labels; 403 until the lecturer
 releases grades. Coding answers render in a read-only `CodeBlock` with the language, and the stored

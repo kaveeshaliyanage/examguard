@@ -29,6 +29,11 @@ const exam: ExamDetail = {
   enrollmentCount: 1,
   releasedCount: 0,
   awaitingReleaseCount: 1,
+  requiresPin: false,
+  pinConfigured: false,
+  pinIssuedAt: null,
+  pinSentAt: null,
+  requiresPreflight: false,
   questions: [],
   resourceRules: [],
   permissions: [

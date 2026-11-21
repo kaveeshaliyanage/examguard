@@ -10,18 +10,20 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import {
   useAddPermission,
   useAddRosterEntry,
+  useIssueExamPin,
   useRemovePermission,
   useRemoveRosterEntry,
   useRoster,
   useUpdateStatus,
 } from '../../api/staffQueries';
-import type { ExamDetail, PermissionLevel } from '../../api/types';
+import type { ExamDetail, ExamPinResult, PermissionLevel } from '../../api/types';
 import { LoadingBlock } from '../../components/LoadingBlock';
 import { StatusChip } from '../../components/StatusChip';
 import { useToast } from '../../components/ToastProvider';
@@ -43,10 +45,39 @@ export function SettingsTab({ exam, canManage }: SettingsTabProps) {
   const roster = useRoster(exam.id);
   const addRosterEntry = useAddRosterEntry(exam.id);
   const removeRosterEntry = useRemoveRosterEntry(exam.id);
+  const issuePin = useIssueExamPin(exam.id);
   const [email, setEmail] = useState('');
   const [level, setLevel] = useState<PermissionLevel>('REVIEWER');
   const [rosterEmail, setRosterEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [pinResult, setPinResult] = useState<ExamPinResult | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const issueAccessPin = () => {
+    setPinError(null);
+    setCopied(false);
+    issuePin.mutate(undefined, {
+      onSuccess: (result) => {
+        setPinResult(result);
+        showToast('A new PIN has been issued.', { severity: 'success' });
+      },
+      onError: (caught) =>
+        setPinError(caught instanceof ApiError ? caught.message : 'Could not issue the PIN.'),
+    });
+  };
+
+  const copyPin = async () => {
+    if (!pinResult) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(pinResult.pin);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   const changeStatus = (next: 'OPEN' | 'CLOSED') => {
     setError(null);
@@ -169,6 +200,84 @@ export function SettingsTab({ exam, canManage }: SettingsTabProps) {
         >
           Open grading
         </Button>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Access PIN
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Candidates sign in with their email and password, then need this six-digit PIN to open a new
+          attempt. Issuing a new PIN replaces the previous one and emails the roster.
+        </Typography>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+          <Chip
+            size="small"
+            variant="outlined"
+            color={exam.requiresPin ? 'success' : 'default'}
+            label={exam.requiresPin ? 'PIN required' : 'PIN not required'}
+          />
+          <Chip
+            size="small"
+            variant="outlined"
+            color={exam.pinConfigured ? 'default' : 'warning'}
+            label={exam.pinConfigured ? 'PIN issued' : 'No PIN issued'}
+          />
+          {exam.requiresPreflight ? (
+            <Chip size="small" variant="outlined" label="Pre-exam checks required" />
+          ) : null}
+        </Stack>
+        {exam.pinIssuedAt ? (
+          <Typography variant="body2" color="text.secondary">
+            Issued {formatDateTime(exam.pinIssuedAt)}
+            {exam.pinSentAt ? ` · emailed ${formatDateTime(exam.pinSentAt)}` : ' · not emailed (no mail server or roster)'}
+          </Typography>
+        ) : null}
+        {pinError ? <Alert severity="error" sx={{ mt: 1.5 }}>{pinError}</Alert> : null}
+        {pinResult ? (
+          <Alert severity="success" sx={{ mt: 1.5 }}>
+            <Stack spacing={0.5} alignItems="flex-start">
+              <Typography variant="body2">
+                Give this PIN to candidates now; it is shown only once. The previous PIN no longer
+                works.
+              </Typography>
+              <Typography variant="h4" sx={{ fontFamily: 'monospace', letterSpacing: 6 }}>
+                {pinResult.pin}
+              </Typography>
+              <Button size="small" startIcon={<ContentCopyIcon />} onClick={() => void copyPin()}>
+                {copied ? 'Copied' : 'Copy PIN'}
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                {pinResult.mailConfigured
+                  ? `Emailed to ${pinResult.emailed} of ${pinResult.recipients} roster addresses.`
+                  : 'Email is not configured on this server, so share the PIN directly.'}
+                {pinResult.failedRecipients.length > 0
+                  ? ` Failed: ${pinResult.failedRecipients.join(', ')}.`
+                  : ''}
+              </Typography>
+            </Stack>
+          </Alert>
+        ) : null}
+        {canManage ? (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1.5 }}>
+            <Button
+              variant="contained"
+              onClick={issueAccessPin}
+              disabled={issuePin.isPending}
+            >
+              {issuePin.isPending ? 'Issuing…' : exam.pinConfigured ? 'Issue a new PIN' : 'Issue PIN and email roster'}
+            </Button>
+            {(!roster.data || roster.data.length === 0) ? (
+              <Typography variant="caption" color="text.secondary">
+                No roster yet: nobody will be emailed, so share the PIN directly.
+              </Typography>
+            ) : null}
+          </Stack>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+            Only an exam owner can issue a PIN.
+          </Typography>
+        )}
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 3 }}>

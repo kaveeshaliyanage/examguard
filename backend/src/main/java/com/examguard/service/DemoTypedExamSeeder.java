@@ -24,6 +24,7 @@ import com.examguard.repo.CandidateRepository;
 import com.examguard.repo.ExamPermissionRepository;
 import com.examguard.repo.ExamRepository;
 import com.examguard.repo.QuestionRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,7 @@ class DemoTypedExamSeeder {
     private final QuestionJson questionJson;
     private final AnswerJson answerJson;
     private final GradingService gradingService;
+    private final PasswordEncoder passwordEncoder;
 
     DemoTypedExamSeeder(
             ExamRepository examRepository,
@@ -60,7 +62,8 @@ class DemoTypedExamSeeder {
             AnswerRevisionRepository revisionRepository,
             QuestionJson questionJson,
             AnswerJson answerJson,
-            GradingService gradingService) {
+            GradingService gradingService,
+            PasswordEncoder passwordEncoder) {
         this.examRepository = examRepository;
         this.permissionRepository = permissionRepository;
         this.questionRepository = questionRepository;
@@ -70,6 +73,7 @@ class DemoTypedExamSeeder {
         this.questionJson = questionJson;
         this.answerJson = answerJson;
         this.gradingService = gradingService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -89,6 +93,7 @@ class DemoTypedExamSeeder {
                 Leave the exam window at most three times. Every focus loss is recorded and your answers
                 are saved when you return. The third focus loss ends the attempt.""");
         exam.setCreatedBy(lecturer);
+        DemoAccess.protect(exam, passwordEncoder);
         exam = examRepository.save(exam);
 
         permissionRepository.save(permission(exam, lecturer, PermissionLevel.OWNER));

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { completePreflight, DEMO_PIN } from './support/preflight';
 
 /**
  * Runs against the compose stack (demo data seeded): a student joins the typed demo exam,
@@ -11,6 +12,7 @@ async function joinDemoExam(page: Page, candidateCode: string) {
   await page.goto('/join');
   await page.getByLabel('Exam code').fill('DEMO-102');
   await page.getByLabel('Candidate code').fill(candidateCode);
+  await page.getByLabel('Exam PIN').fill(DEMO_PIN);
   await page.getByRole('button', { name: 'Join' }).click();
   await expect(page.getByRole('heading', { name: /Demo Examination/ })).toBeVisible({
     timeout: 45_000,
@@ -21,7 +23,7 @@ test('student submits the typed demo exam and the lecturer grades it', async ({ 
   const candidateCode = `E2E${Date.now().toString().slice(-8)}`;
 
   await joinDemoExam(page, candidateCode);
-  await page.getByRole('button', { name: 'Begin exam' }).click();
+  await completePreflight(page);
 
   await expect(page.getByText('Question 1 of 5')).toBeVisible();
   await page.getByRole('radio', { name: 'B. TCP' }).check();
@@ -55,7 +57,7 @@ test('focus losses raise strikes and the third one terminates the attempt', asyn
   const candidateCode = `E2E${Date.now().toString().slice(-8)}`;
 
   await joinDemoExam(page, candidateCode);
-  await page.getByRole('button', { name: 'Begin exam' }).click();
+  await completePreflight(page);
 
   await page.getByRole('radio', { name: 'B. TCP' }).check();
   await expect(page.getByText('Saved', { exact: false }).first()).toBeVisible();

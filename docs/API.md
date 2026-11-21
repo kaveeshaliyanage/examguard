@@ -34,14 +34,15 @@ Returns the same `user` object.
 
 ### `POST /public/join`
 ```json
-{ "examCode": "DEMO-101", "candidateCode": "C001" }
+{ "examCode": "DEMO-101", "candidateCode": "C001", "accessPin": "246810" }
 ```
-Creating a new attempt needs only the two codes, subject to the exam window and roster. Resuming an
-existing attempt needs `"resumeToken": "<attempt jwt from the first join>"`; this endpoint is
-permit-all and ignores `Authorization`. Anything else returns 403 `A resume token is required to
-continue this attempt`, and a token for another attempt returns 403 as well. A signed-in student
-resumes by account instead through `POST /student/attempts/join`. An in-progress attempt stays
-resumable after `closesAt`.
+Creating a new attempt needs the two codes, subject to the exam window, PIN and roster. `accessPin` is
+required when the exam has the PIN gate on (`requiresPin`), and is ignored when a PIN has never been
+issued. Resuming an existing attempt needs its proof instead of the PIN:
+`"resumeToken": "<attempt jwt from the first join>"`, or the owning student account through
+`POST /student/attempts/join`; this endpoint is permit-all and ignores `Authorization`. Anything else
+returns 403 `A resume token is required to continue this attempt`, and a token for another attempt
+returns 403 as well. An in-progress attempt stays resumable after `closesAt`.
 ```json
 {
   "attemptId": 1,
@@ -49,7 +50,12 @@ resumable after `closesAt`.
   "collectorToken": "<same token; convenience for the extension handshake>",
   "status": "IN_PROGRESS",
   "startedAt": "2026-11-01T09:00:00Z",
+  "activeStartedAt": "2026-11-01T09:04:00Z",
+  "preflightCompletedAt": "2026-11-01T09:04:00Z",
+  "requiresPreflight": true,
+  "autoSubmitted": false,
   "submittedAt": null,
+  "serverNow": "2026-11-01T09:10:00Z",
   "exam": {
     "id": 1, "code": "DEMO-101", "title": "Demo Examination",
     "durationMinutes": 60,
@@ -58,13 +64,21 @@ resumable after `closesAt`.
   "answers": [ { "questionId": 1, "text": "...", "revisionNo": 3, "savedAt": "..." } ]
 }
 ```
+`startedAt` is when the attempt was opened. `activeStartedAt` is when the exam clock actually starts
+(the preflight confirmation, or the join for exams without the wizard) and is `null` until then;
+`preflightCompletedAt` mirrors it for supervised exams. The deadline is
+`activeStartedAt + durationMinutes`.
 
 Join rules:
 
-- `409` if the attempt is already submitted.
+- `409` if the attempt is already submitted, expired or terminated.
 - `409` when starting a **new** attempt outside the schedule (`opensAt` future → "This exam opens at …",
   `closesAt` past → "This exam closed at …"). An attempt already `IN_PROGRESS` always resumes, even
   after `closesAt`, so saved answers are never stranded.
+- PIN gate: when the exam has `requiresPin` on but no PIN has been issued yet, a new join is `409`
+  ("The exam PIN has not been issued yet"). A wrong or superseded PIN is `403`. Five failures for the
+  same exam code and client address within ten minutes make further attempts `429`. A valid PIN clears
+  the counter. Rotating the PIN only affects new joins; resumes by token or account are unaffected.
 - When the exam has a non-empty roster, `403` unless the signed-in account's email is enrolled
   (case-insensitive). Guests (no account token) are refused with `403` and pointed at sign-in.
   Exams without a roster keep open join by code, and enrolment is only checked when a new attempt is
@@ -73,7 +87,33 @@ Join rules:
 ## Candidate (attempt token)
 
 ### `GET /attempts/{attemptId}`
-Same shape as the join response minus the token.
+Same shape as the join response minus the token, plus `lastSeenAt`, `strikeCount`, `maxStrikes`,
+`terminatedAt` and `terminationReason`.
+
+### `POST /attempts/{attemptId}/preflight`
+```json
+{
+  "fullscreen": true, "connectionOk": true, "deviceOk": true, "micOk": true,
+  "noiseOk": true, "cameraOk": true, "faceDetected": true, "gazeOnScreen": true,
+  "noiseLevel": "-52 dBFS",
+  "photoDataUrl": "data:image/jpeg;base64,...",
+  "checks": { "gazeMethod": "native", "ambientNoiseDb": -52, "connectionMs": 84 }
+}
+```
+```json
+{ "completedAt": "...", "activeStartedAt": "...", "deadlineAt": "...",
+  "durationMinutes": 60, "serverNow": "..." }
+```
+Confirms the supervised pre-exam window. Every check must be `true`, otherwise `400`; the photo must
+be a `data:image/...` URL. Confirmation is what starts the clock: `activeStartedAt`, `startedAt` and
+`preflightCompletedAt` become the server's now, and the deadline is `activeStartedAt + duration`.
+Idempotent — a second call returns the first confirmation unchanged. The client `checks` are stored
+next to the server booleans for staff review but cannot overwrite them.
+
+For an exam with `requiresPreflight`, `PUT answers` and `POST submit` return `409` until the preflight
+is confirmed. After the deadline, `PUT answers` returns `409` ("Time is up …") and the scheduler
+auto-submits the attempt at its deadline: saved revisions are kept, unanswered questions stay
+unanswered, and grading runs exactly as a manual submit.
 
 ### `PUT /attempts/{attemptId}/answers/{questionId}`
 ```json
@@ -132,7 +172,9 @@ Duplicates are detected by `(attemptId, clientEventId)`. Events outside the atte
 `signal` is `FOCUS_LOSS`, `FOCUS_RETURN` or `VISIBILITY_HIDDEN`. Signals are de-duplicated by
 `(attemptId, episodeKey)`, so a retried report never adds a strike. The `maxStrikes`-th `FOCUS_LOSS`
 returns `terminated: true` with `status: "TERMINATED"`, auto-grades the saved answers and later saves
-or submits return `409`.
+or submits return `409`. The runtime watcher also reports `FULLSCREEN_EXIT`, `GAZE_AWAY`,
+`GAZE_RETURN`, `CAMERA_LOST`, `NOISE_HIGH`, `NETWORK_LOST` and `NETWORK_RESTORED`; these are
+informational — stored for review, never counted as a strike.
 
 ## Student accounts
 
@@ -154,9 +196,10 @@ throttled.
 Returns the signed-in `user` object.
 
 ### `POST /student/attempts/join`
-Same request and response as `POST /public/join`; the attempt is linked to the signed-in account, and
-the roster is checked against that account's email. The account is proof of ownership, so an attempt
-already linked to it resumes without `resumeToken`; one linked to a different account returns `403`.
+Same request and response as `POST /public/join` (including `accessPin` for a PIN-gated exam); the
+attempt is linked to the signed-in account, and the roster is checked against that account's email.
+The account is proof of ownership, so an attempt already linked to it resumes without `resumeToken`
+or PIN; one linked to a different account returns `403`.
 
 ### `GET /student/attempts`
 ```json
@@ -187,6 +230,8 @@ already linked to it resumes without `resumeToken`; one linked to a different ac
   "instructions": "Close other applications.",
   "opensAt": "2026-11-12T09:00:00Z",
   "closesAt": "2026-11-12T11:00:00Z",
+  "requiresPin": true,
+  "requiresPreflight": true,
   "questions": [ { "prompt": "Explain ...", "maxWords": 250 } ],
   "resourceRules": [
     { "category": "PERMITTED", "domainPattern": "*.edu", "note": "University resources" },
@@ -196,11 +241,14 @@ already linked to it resumes without `resumeToken`; one linked to a different ac
 ```
 Creates the exam in `DRAFT`, creates questions/rules and an `OWNER` permission for the creator.
 `opensAt` and `closesAt` are optional; when both are present `opensAt` must be before `closesAt`.
-`maxStrikes` defaults to 3 (range 1–10). Returns the exam detail.
+`maxStrikes` defaults to 3 (range 1–10). `requiresPreflight` defaults to `true` (the supervised
+pre-exam window); `requiresPin` defaults to `false` until a PIN is issued or the flag is switched on.
+Returns the exam detail.
 
 ### `GET /exams/{id}`
 Detail: summary fields plus `description`, `allowExtension`, `maxStrikes`, `instructions`, `opensAt`,
-`closesAt`, questions, resourceRules and permissions. Also carries the counts
+`closesAt`, `requiresPin`, `pinConfigured`, `pinIssuedAt`, `pinSentAt`, `requiresPreflight`,
+questions, resourceRules and permissions. Also carries the counts
 `attemptCount`, `submittedCount`, `findingCount`, `openFindingCount`, `enrollmentCount`,
 `releasedCount` and `awaitingReleaseCount`.
 
@@ -217,13 +265,17 @@ Full replacement of the editable settings. Exam **owner only**; writes audit act
   "instructions": "Close other applications.",
   "opensAt": null,
   "closesAt": null,
+  "requiresPin": true,
+  "requiresPreflight": false,
   "resourceRules": [ { "category": "PROHIBITED", "domainPattern": "chegg.com", "note": "Cheating site" } ]
 }
 ```
 `durationMinutes` is 5–600, `maxStrikes` 1–10, and a present pair must satisfy `opensAt < closesAt`
 (otherwise `400`). `resourceRules` replaces the whole set. The **code is immutable** — it is the join
-key. Editing stays allowed after candidates join; duration is evaluated when an attempt is submitted,
-so it affects lateness, not already-started timers.
+key. Editing stays allowed after candidates join; duration is evaluated when an attempt is submitted
+and when the expiry sweep runs, so it affects lateness and remaining timers, not already-confirmed
+preflight timestamps. Switching `requiresPreflight` on only affects attempts that have not confirmed
+the wizard yet; attempts already started keep their saved answers.
 
 ### `GET /exams/{id}/roster`
 ```json
@@ -241,6 +293,28 @@ invalid addresses are `400`. Owner only.
 ### `DELETE /exams/{id}/roster/{entryId}`
 `204`. Owner only. Removing the last entry re-opens join by exam code alone.
 
+### `POST /exams/{id}/pin`
+Owner only. Rotates the exam PIN to a new random six digits and emails it to every roster address when
+mail is enabled. Only a BCrypt hash is stored; the plaintext is returned exactly once and is never
+logged or audited. Rotating invalidates the previous PIN for new joins.
+```json
+{ "pin": "246810", "recipients": 42, "emailed": 41, "failedRecipients": ["bounced@example.edu"],
+  "issuedAt": "...", "sentAt": "...", "requiresPin": true, "mailConfigured": true }
+```
+`mailConfigured` is `false` when `MAIL_ENABLED` is off or no mail sender exists, in which case
+`emailed` is 0 and the lecturer reads the PIN from this one-time response. A roster-less exam returns
+`recipients: 0`; the PIN still works for code-only joins. With no roster this is still useful as a
+shared class PIN.
+
+### `GET /exams/{id}/attempts/{attemptId}/preflight`
+Exam viewer or owner. The identity photo captured in the wizard plus its stored checks:
+```json
+{ "completedAt": "...", "photoTakenAt": "...", "photoDataUrl": "data:image/jpeg;base64,...",
+  "checks": { "fullscreen": true, "connectionOk": true, "...": true,
+              "noiseLevel": "-52 dBFS", "gazeMethod": "native", "ambientNoiseDb": -52 } }
+```
+`photoDataUrl` and `checks` are `null` when the attempt skipped the wizard.
+
 ### `PATCH /exams/{id}/status`
 ```json
 { "status": "OPEN" }
@@ -250,10 +324,14 @@ Allowed: `DRAFT`, `OPEN`, `CLOSED`, `ANALYSED` (the last is set by the analysis 
 ### `GET /exams/{id}/attempts`
 ```json
 [ { "attemptId": 1, "candidateCode": "C001", "status": "SUBMITTED",
-    "startedAt": "...", "submittedAt": "...", "lastSeenAt": "...",
+    "startedAt": "...", "activeStartedAt": "...", "submittedAt": "...", "lastSeenAt": "...",
+    "preflightCompletedAt": "...", "autoSubmitted": false, "hasPhoto": true,
     "answerCount": 4, "eventCount": 12, "coveragePercent": 92.5,
     "coverageWarning": false, "lateSubmission": false } ]
 ```
+`activeStartedAt` is the real timer start (preflight confirmation or join) and is `null` while the
+wizard is still pending; `autoSubmitted` marks attempts stopped by the deadline sweep; `hasPhoto`
+says whether an identity photo is stored.
 
 ### `POST /exams/{id}/questions`
 Creates one question (`PUT /exams/{id}/questions/{questionId}` updates, `DELETE` removes). Owner only.

@@ -126,4 +126,45 @@ describe('AttemptEditor integrity monitoring', () => {
     // The confirm dialog closes on the failed submit; the page button is only reachable after it unmounts.
     expect(await screen.findByRole('button', { name: 'Submit exam' }, { timeout: 3000 })).toBeInTheDocument();
   }, 60000);
+
+  it('submits the answers saved before the deadline when a late edit is rejected', async () => {
+    const user = userEvent.setup();
+    let saves = 0;
+    let submits = 0;
+    server.use(
+      http.put('/api/attempts/1/answers/:questionId', () => {
+        saves += 1;
+        return HttpResponse.json({ message: 'Time is up.' }, { status: 409 });
+      }),
+      http.post('/api/attempts/1/submit', () => {
+        submits += 1;
+        return HttpResponse.json({
+          attemptId: 1,
+          status: 'SUBMITTED',
+          submittedAt: '2026-11-01T10:00:00Z',
+          lateSubmission: true,
+        });
+      }),
+    );
+    writeAttemptSession(session);
+
+    // The clock shows four seconds left, so the editor expires while an edit is still in flight.
+    const aboutToExpire = {
+      ...attemptStateFixture,
+      startedAt: '2026-11-01T09:00:00Z',
+      activeStartedAt: '2026-11-01T09:00:00Z',
+      serverNow: '2026-11-01T09:59:56Z',
+    };
+    renderRoute(<AttemptEditor state={aboutToExpire} session={session} />, {
+      path: '/attempt/:attemptId',
+      initialEntry: '/attempt/1',
+    });
+
+    const answer = await screen.findByLabelText('Answer for question 1');
+    await user.type(answer, 'Typed just before the deadline.');
+    await waitFor(() => expect(saves).toBeGreaterThan(0), { timeout: 5000 });
+
+    // The rejected late edit must not block submitting what was saved in time.
+    await waitFor(() => expect(submits).toBe(1), { timeout: 10_000 });
+  }, 30000);
 });

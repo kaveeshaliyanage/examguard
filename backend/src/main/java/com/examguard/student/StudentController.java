@@ -47,8 +47,9 @@ public class StudentController {
     }
 
     @PostMapping("/attempts/join")
-    public JoinResponse join(Authentication authentication, @Valid @RequestBody JoinRequest request) {
-        return studentService.join(authentication, request);
+    public JoinResponse join(Authentication authentication, @Valid @RequestBody JoinRequest request,
+                             HttpServletRequest http) {
+        return studentService.join(authentication, request, http.getRemoteAddr());
     }
 
     @GetMapping("/attempts")

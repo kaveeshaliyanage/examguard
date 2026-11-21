@@ -54,6 +54,8 @@ public final class ExamDtos {
             @Size(max = 8000) String instructions,
             Instant opensAt,
             Instant closesAt,
+            Boolean requiresPin,
+            Boolean requiresPreflight,
             @NotEmpty @Size(max = 100) List<@Valid QuestionPayload> questions,
             @Size(max = 100) List<@Valid CreateRule> resourceRules) {
     }
@@ -68,6 +70,8 @@ public final class ExamDtos {
             @Size(max = 8000) String instructions,
             Instant opensAt,
             Instant closesAt,
+            Boolean requiresPin,
+            Boolean requiresPreflight,
             @Size(max = 100) List<@Valid CreateRule> resourceRules) {
     }
 
@@ -128,6 +132,11 @@ public final class ExamDtos {
             long enrollmentCount,
             long releasedCount,
             long awaitingReleaseCount,
+            boolean requiresPin,
+            boolean pinConfigured,
+            Instant pinIssuedAt,
+            Instant pinSentAt,
+            boolean requiresPreflight,
             List<StaffQuestionView> questions,
             List<RuleView> resourceRules,
             List<PermissionView> permissions) {
@@ -153,12 +162,27 @@ public final class ExamDtos {
             String candidateCode,
             AttemptStatus status,
             Instant startedAt,
+            Instant activeStartedAt,
             Instant submittedAt,
             Instant lastSeenAt,
+            Instant preflightCompletedAt,
+            boolean autoSubmitted,
+            boolean hasPhoto,
             long answerCount,
             long eventCount,
             double coveragePercent,
             boolean coverageWarning,
             boolean lateSubmission) {
+    }
+
+    public record ExamPinView(
+            String pin,
+            int recipients,
+            int emailed,
+            List<String> failedRecipients,
+            Instant issuedAt,
+            Instant sentAt,
+            boolean requiresPin,
+            boolean mailConfigured) {
     }
 }

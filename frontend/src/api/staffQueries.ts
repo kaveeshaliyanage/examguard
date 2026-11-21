@@ -2,12 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_BASE, ApiError, isArrayOf, isExamList, isFindingDetail, isRecord, request } from './client';
 import type {
   AnalysisRun,
+  AttemptPreflight,
   AuditEntry,
   CreateExamInput,
   CreateQuestionInput,
   DecisionOutcome,
   DecisionView,
   ExamDetail,
+  ExamPinResult,
   ExamQuestion,
   ExamStatus,
   ExamSummary,
@@ -59,6 +61,33 @@ export function useExamAttempts(examId: number | undefined) {
       staffRequest<AttemptSummary[]>(`/exams/${examId}/attempts`, {
         validate: (value) => isArrayOf(value, (item) => isRecord(item) && typeof item.attemptId === 'number'),
       }),
+    // Attempts change while the exam runs; keep the roster view reasonably fresh.
+    refetchInterval: 30_000,
+  });
+}
+
+export function useAttemptPreflight(examId: number, attemptId: number | null) {
+  return useQuery({
+    queryKey: ['exam', examId, 'attempt', attemptId, 'preflight'],
+    enabled: attemptId !== null,
+    queryFn: () =>
+      staffRequest<AttemptPreflight>(`/exams/${examId}/attempts/${attemptId}/preflight`, {
+        validate: (value) => isRecord(value) && typeof value.completedAt === 'string',
+      }),
+  });
+}
+
+export function useIssueExamPin(examId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      staffRequest<ExamPinResult>(`/exams/${examId}/pin`, {
+        method: 'POST',
+        validate: (value) => isRecord(value) && typeof value.pin === 'string',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['exam', examId] });
+    },
   });
 }
 

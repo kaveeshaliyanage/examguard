@@ -12,6 +12,7 @@ import { ExamDetailPage } from './features/exams/ExamDetailPage';
 import { ExamListPage } from './features/exams/ExamListPage';
 import { FindingDetailPage } from './features/findings/FindingDetailPage';
 import { AttemptPage } from './features/student/AttemptPage';
+import { PreflightPage } from './features/student/PreflightPage';
 import { ExamInstructionsPage } from './features/student/ExamInstructionsPage';
 import { StudentDashboardPage } from './features/student/StudentDashboardPage';
 import { StudentReportPage } from './features/student/StudentReportPage';
@@ -41,6 +42,7 @@ export function AppRoutes() {
       <Route path="/join" element={<JoinPage />} />
       <Route path="/student" element={<StudentDashboardPage />} />
       <Route path="/attempt/:attemptId" element={<AttemptPage />} />
+      <Route path="/attempt/:attemptId/preflight" element={<PreflightPage />} />
       <Route path="/attempt/:attemptId/instructions" element={<ExamInstructionsPage />} />
       <Route path="/attempt/:attemptId/report" element={<StudentReportPage />} />
       <Route path="/attempt/:attemptId/submitted" element={<SubmittedPage />} />

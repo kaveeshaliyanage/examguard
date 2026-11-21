@@ -109,6 +109,9 @@ public abstract class ApiTestBase {
         exam.setDurationMinutes(60);
         exam.setStatus(status);
         exam.setCreatedBy(owner);
+        // Legacy fixture: exams that opt into a PIN or the pre-exam wizard set these explicitly.
+        exam.setRequiresPin(false);
+        exam.setRequiresPreflight(false);
         exam = examRepository.save(exam);
         grant(exam, owner, PermissionLevel.OWNER);
         return exam;

@@ -71,6 +71,10 @@ export function AttemptPage() {
     return <Navigate to={`/attempt/${id}/submitted`} replace />;
   }
 
+  if (state.status === 'IN_PROGRESS' && state.requiresPreflight && !state.preflightCompletedAt) {
+    return <Navigate to={`/attempt/${id}/preflight`} replace />;
+  }
+
   return (
     <AttemptEditor
       key={state.attemptId}
