@@ -1,5 +1,9 @@
 # secrets
 .env
+.env.*
+!.env.example
+frontend/.env.local
+kaggle.json
 *.pem
 
 # java
@@ -17,6 +21,7 @@ ai/models/*.meta.json
 ai/models/MODEL_CARD.md
 ai/data/*.jsonl
 ai/data/manifest.json
+ai/data-authorship/
 ai/data-external/
 ai/build/
 *.pyc
@@ -46,3 +51,7 @@ docs/.qoder-office-pptx-locks/
 # playwright
 frontend/playwright-report/
 frontend/test-results/
+
+# runner
+runner/.pytest_cache/
+runner/**/__pycache__/
