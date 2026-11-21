@@ -51,7 +51,9 @@ public class AttemptExpiryService {
             return false;
         }
         attempt.setStatus(AttemptStatus.SUBMITTED);
-        attempt.setSubmittedAt(now);
+        // Record the deadline, not the tick time: a scheduler that was asleep (an idle free-tier
+        // instance, a restart) must not make the attempt look as if it ran on past its time.
+        attempt.setSubmittedAt(AttemptClock.deadline(attempt));
         attempt.setLastSeenAt(now);
         attempt.setAutoSubmitted(true);
         attempt.setLateSubmission(false);
