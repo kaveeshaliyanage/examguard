@@ -15,6 +15,7 @@ import com.examguard.domain.Question;
 import com.examguard.domain.ResourceRule;
 import com.examguard.domain.Role;
 import com.examguard.domain.User;
+import com.examguard.attempt.AttemptDtos.AttemptPreflightView;
 import com.examguard.exam.ExamDtos.AttemptSummary;
 import com.examguard.exam.ExamDtos.CreateExamRequest;
 import com.examguard.exam.ExamDtos.CreateRule;
@@ -38,6 +39,9 @@ import com.examguard.repo.ResourceRuleRepository;
 import com.examguard.repo.UserRepository;
 import com.examguard.service.AccessService;
 import com.examguard.service.AuditService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -70,6 +74,7 @@ public class ExamService {
     private final QuestionService questionService;
     private final AccessService accessService;
     private final AuditService auditService;
+    private final ObjectMapper objectMapper;
 
     public ExamService(
             ExamRepository examRepository,
@@ -85,7 +90,8 @@ public class ExamService {
             ExamEnrollmentRepository enrollmentRepository,
             QuestionService questionService,
             AccessService accessService,
-            AuditService auditService) {
+            AuditService auditService,
+            ObjectMapper objectMapper) {
         this.examRepository = examRepository;
         this.questionRepository = questionRepository;
         this.ruleRepository = ruleRepository;
@@ -100,6 +106,7 @@ public class ExamService {
         this.questionService = questionService;
         this.accessService = accessService;
         this.auditService = auditService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -138,6 +145,8 @@ public class ExamService {
         exam.setInstructions(request.instructions());
         exam.setOpensAt(request.opensAt());
         exam.setClosesAt(request.closesAt());
+        exam.setRequiresPin(request.requiresPin() == null || request.requiresPin());
+        exam.setRequiresPreflight(request.requiresPreflight() == null || request.requiresPreflight());
         exam.setCreatedBy(creator);
         exam = examRepository.save(exam);
 
@@ -217,6 +226,15 @@ public class ExamService {
         if (!Objects.equals(exam.getClosesAt(), request.closesAt())) {
             exam.setClosesAt(request.closesAt());
             changed.add("closesAt");
+        }
+        if (request.requiresPin() != null && exam.isRequiresPin() != request.requiresPin()) {
+            exam.setRequiresPin(request.requiresPin());
+            changed.add("requiresPin");
+        }
+        if (request.requiresPreflight() != null
+                && exam.isRequiresPreflight() != request.requiresPreflight()) {
+            exam.setRequiresPreflight(request.requiresPreflight());
+            changed.add("requiresPreflight");
         }
         examRepository.save(exam);
 
@@ -326,13 +344,41 @@ public class ExamService {
                 candidate.getCode(),
                 attempt.getStatus(),
                 attempt.getStartedAt(),
+                attempt.getActiveStartedAt(),
                 attempt.getSubmittedAt(),
                 attempt.getLastSeenAt(),
+                attempt.getPreflightCompletedAt(),
+                attempt.isAutoSubmitted(),
+                attempt.getProfilePhoto() != null,
                 revisionRepository.countAnsweredQuestions(attempt.getId()),
                 events.size(),
                 coverage.percent(),
                 coverage.warning(),
                 attempt.isLateSubmission());
+    }
+
+    @Transactional(readOnly = true)
+    public AttemptPreflightView preflight(Authentication auth, Long examId, Long attemptId) {
+        accessService.requireExamView(auth, examId);
+        Attempt attempt = attemptRepository.findById(attemptId)
+                .filter(found -> found.getExam().getId().equals(examId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Attempt not found"));
+        return new AttemptPreflightView(
+                attempt.getPreflightCompletedAt(),
+                attempt.getPhotoTakenAt(),
+                attempt.getProfilePhoto(),
+                preflightChecks(attempt.getPreflightJson()));
+    }
+
+    private Map<String, Object> preflightChecks(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() { });
+        } catch (JsonProcessingException ex) {
+            return Map.of();
+        }
     }
 
     private ExamMapper.Counts counts(Long examId) {

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 /**
  * Creates a self-contained demonstration cohort so the analysis service and dashboard can be
@@ -81,6 +82,35 @@ public class DemoDataSeeder implements CommandLineRunner {
         }
         if (examRepository.findByCodeIgnoreCase(DemoCodeExamSeeder.EXAM_CODE).isEmpty()) {
             seedCodeExam(admin, lecturer, reviewer);
+        }
+        refreshDemoExams();
+    }
+
+    /**
+     * A demo database volume can outlive the seeded join window or predate the PIN and preflight
+     * columns. Keep the scripted exams joinable and protected so the documented demo flow does
+     * not silently stop working after a week.
+     */
+    private void refreshDemoExams() {
+        Instant now = Instant.now();
+        for (String code : List.of(DemoExamSeeder.EXAM_CODE, DemoTypedExamSeeder.EXAM_CODE,
+                DemoCodeExamSeeder.EXAM_CODE)) {
+            examRepository.findByCodeIgnoreCase(code).ifPresent(exam -> {
+                boolean changed = false;
+                if (exam.getClosesAt() != null && exam.getClosesAt().isBefore(now)) {
+                    exam.setOpensAt(now.minus(1, ChronoUnit.HOURS));
+                    exam.setClosesAt(now.plus(7, ChronoUnit.DAYS));
+                    changed = true;
+                }
+                if (!exam.isRequiresPin() || !exam.isRequiresPreflight() || exam.getAccessPinHash() == null) {
+                    DemoAccess.protect(exam, passwordEncoder);
+                    changed = true;
+                }
+                if (changed) {
+                    examRepository.save(exam);
+                    log.info("Refreshed demo exam {}: window and access PIN kept current", code);
+                }
+            });
         }
     }
 

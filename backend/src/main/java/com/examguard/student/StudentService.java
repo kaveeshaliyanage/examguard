@@ -101,9 +101,9 @@ public class StudentService {
     }
 
     @Transactional
-    public JoinResponse join(Authentication auth, JoinRequest request) {
+    public JoinResponse join(Authentication auth, JoinRequest request, String client) {
         User user = accessService.requireStudentAccount(auth);
-        return joinService.join(request, user);
+        return joinService.join(request, user, client);
     }
 
     @Transactional(readOnly = true)

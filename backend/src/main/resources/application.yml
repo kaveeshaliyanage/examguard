@@ -36,6 +36,14 @@ spring:
     multipart:
       max-file-size: 1MB
       max-request-size: 1MB
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${MAIL_STARTTLS:false}
 
 management:
   endpoints:
@@ -65,6 +73,12 @@ app:
     read-timeout-ms: 90000
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  mail:
+    # When false the PIN is returned once to the lecturer and never emailed or logged.
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:no-reply@examguard.local}
+  attempt-expiry:
+    interval-ms: ${ATTEMPT_EXPIRY_INTERVAL_MS:15000}
   seed-demo-data: ${SEED_DEMO_DATA:false}
 
 logging:

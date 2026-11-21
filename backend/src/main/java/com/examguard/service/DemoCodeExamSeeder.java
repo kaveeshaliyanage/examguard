@@ -27,6 +27,7 @@ import com.examguard.repo.ExamEnrollmentRepository;
 import com.examguard.repo.ExamPermissionRepository;
 import com.examguard.repo.ExamRepository;
 import com.examguard.repo.QuestionRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -59,6 +60,7 @@ class DemoCodeExamSeeder {
     private final QuestionJson questionJson;
     private final AnswerJson answerJson;
     private final CodeJudgeService codeJudgeService;
+    private final PasswordEncoder passwordEncoder;
 
     DemoCodeExamSeeder(
             ExamRepository examRepository,
@@ -70,7 +72,8 @@ class DemoCodeExamSeeder {
             AnswerRevisionRepository revisionRepository,
             QuestionJson questionJson,
             AnswerJson answerJson,
-            CodeJudgeService codeJudgeService) {
+            CodeJudgeService codeJudgeService,
+            PasswordEncoder passwordEncoder) {
         this.examRepository = examRepository;
         this.permissionRepository = permissionRepository;
         this.enrollmentRepository = enrollmentRepository;
@@ -81,6 +84,7 @@ class DemoCodeExamSeeder {
         this.questionJson = questionJson;
         this.answerJson = answerJson;
         this.codeJudgeService = codeJudgeService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -104,6 +108,7 @@ class DemoCodeExamSeeder {
                 hidden tests; there is no partial-credit penalty for trying. Leaving the exam window is
                 still recorded.""");
         exam.setCreatedBy(lecturer);
+        DemoAccess.protect(exam, passwordEncoder);
         exam = examRepository.save(exam);
 
         permissionRepository.save(permission(exam, lecturer, PermissionLevel.OWNER));

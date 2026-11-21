@@ -24,6 +24,7 @@ import com.examguard.repo.QuestionRepository;
 import com.examguard.service.AuditService;
 import io.jsonwebtoken.Claims;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -47,6 +49,8 @@ public class JoinService {
     private final AuditService auditService;
     private final QuestionJson questionJson;
     private final AnswerJson answerJson;
+    private final PasswordEncoder passwordEncoder;
+    private final PinThrottle pinThrottle;
 
     public JoinService(
             ExamRepository examRepository,
@@ -58,7 +62,9 @@ public class JoinService {
             JwtService jwtService,
             AuditService auditService,
             QuestionJson questionJson,
-            AnswerJson answerJson) {
+            AnswerJson answerJson,
+            PasswordEncoder passwordEncoder,
+            PinThrottle pinThrottle) {
         this.examRepository = examRepository;
         this.candidateRepository = candidateRepository;
         this.attemptRepository = attemptRepository;
@@ -69,15 +75,17 @@ public class JoinService {
         this.auditService = auditService;
         this.questionJson = questionJson;
         this.answerJson = answerJson;
+        this.passwordEncoder = passwordEncoder;
+        this.pinThrottle = pinThrottle;
     }
 
     @Transactional
     public JoinResponse join(JoinRequest request) {
-        return join(request, null);
+        return join(request, null, "public");
     }
 
     @Transactional
-    public JoinResponse join(JoinRequest request, User student) {
+    public JoinResponse join(JoinRequest request, User student, String client) {
         Exam exam = examRepository.findByCodeIgnoreCase(request.examCode().trim())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam code not recognised"));
         if (exam.getStatus() != ExamStatus.OPEN) {
@@ -97,6 +105,7 @@ public class JoinService {
         // resumed so no answers are stranded, but it needs proof that the caller owns it.
         if (attempt == null) {
             enforceJoinWindow(exam);
+            verifyPin(exam, request.accessPin(), client);
             enforceRoster(exam, student);
         } else {
             requireResumeProof(request.resumeToken(), attempt, student);
@@ -128,11 +137,38 @@ public class JoinService {
                 attemptToken,
                 attempt.getStatus().name(),
                 attempt.getStartedAt(),
+                attempt.getActiveStartedAt(),
+                attempt.getPreflightCompletedAt(),
+                exam.isRequiresPreflight(),
+                attempt.isAutoSubmitted(),
                 attempt.getSubmittedAt(),
                 Instant.now(),
                 attempt.isExtensionConnected(),
                 examForAttempt(exam),
                 latestAnswers(attempt));
+    }
+
+    /**
+     * The PIN is checked only when a new attempt is opened. Resuming an existing attempt instead
+     * requires its token or owning account, so a rotated PIN never strands saved answers.
+     */
+    private void verifyPin(Exam exam, String supplied, String client) {
+        if (!exam.isRequiresPin() && exam.getAccessPinHash() == null) {
+            return;
+        }
+        String key = exam.getCode().toLowerCase(Locale.ROOT) + "|" + client;
+        if (exam.getAccessPinHash() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The exam PIN has not been issued yet. Contact your lecturer.");
+        }
+        pinThrottle.check(key);
+        String candidate = supplied == null ? "" : supplied.trim();
+        if (candidate.isEmpty() || !passwordEncoder.matches(candidate, exam.getAccessPinHash())) {
+            pinThrottle.recordFailure(key);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The exam PIN is incorrect or has been replaced by a newer PIN");
+        }
+        pinThrottle.clear(key);
     }
 
     /**
@@ -223,9 +259,14 @@ public class JoinService {
         attempt.setExam(exam);
         attempt.setCandidate(candidate);
         attempt.setStatus(AttemptStatus.IN_PROGRESS);
-        attempt.setStartedAt(Instant.now());
-        attempt.setLastSeenAt(Instant.now());
+        Instant now = Instant.now();
+        attempt.setStartedAt(now);
+        attempt.setLastSeenAt(now);
         attempt.setMaxStrikes(exam.getMaxStrikes());
+        if (!exam.isRequiresPreflight()) {
+            attempt.setActiveStartedAt(now);
+            attempt.setPreflightCompletedAt(now);
+        }
         return attemptRepository.save(attempt);
     }
 

@@ -84,6 +84,11 @@ final class ExamMapper {
                 counts.enrollmentCount(),
                 counts.releasedCount(),
                 counts.awaitingReleaseCount(),
+                exam.isRequiresPin(),
+                exam.getAccessPinHash() != null,
+                exam.getAccessPinIssuedAt(),
+                exam.getAccessPinSentAt(),
+                exam.isRequiresPreflight(),
                 questions,
                 rules.stream().map(ExamMapper::rule).toList(),
                 permissions.stream().map(ExamMapper::permission).toList());

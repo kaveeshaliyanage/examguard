@@ -1,6 +1,8 @@
 package com.examguard.attempt;
 
 import com.examguard.attempt.AttemptDtos.AttemptState;
+import com.examguard.attempt.AttemptDtos.PreflightRequest;
+import com.examguard.attempt.AttemptDtos.PreflightResponse;
 import com.examguard.attempt.AttemptDtos.SaveAnswerRequest;
 import com.examguard.attempt.AttemptDtos.SaveAnswerResponse;
 import com.examguard.attempt.AttemptDtos.SubmitRequest;
@@ -15,6 +17,9 @@ import com.examguard.repo.AnswerRevisionRepository;
 import com.examguard.repo.AttemptRepository;
 import com.examguard.repo.QuestionRepository;
 import com.examguard.service.AccessService;
+import com.examguard.service.AuditService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -23,8 +28,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @Service
@@ -38,6 +45,8 @@ public class AttemptService {
     private final AnswerJson answerJson;
     private final AttemptStateMachine stateMachine;
     private final GradingService gradingService;
+    private final ObjectMapper objectMapper;
+    private final AuditService auditService;
 
     public AttemptService(
             AttemptRepository attemptRepository,
@@ -47,7 +56,9 @@ public class AttemptService {
             JoinService joinService,
             AnswerJson answerJson,
             AttemptStateMachine stateMachine,
-            GradingService gradingService) {
+            GradingService gradingService,
+            ObjectMapper objectMapper,
+            AuditService auditService) {
         this.attemptRepository = attemptRepository;
         this.questionRepository = questionRepository;
         this.revisionRepository = revisionRepository;
@@ -56,6 +67,8 @@ public class AttemptService {
         this.answerJson = answerJson;
         this.stateMachine = stateMachine;
         this.gradingService = gradingService;
+        this.objectMapper = objectMapper;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -65,6 +78,10 @@ public class AttemptService {
                 attempt.getId(),
                 attempt.getStatus().name(),
                 attempt.getStartedAt(),
+                attempt.getActiveStartedAt(),
+                attempt.getPreflightCompletedAt(),
+                attempt.getExam().isRequiresPreflight(),
+                attempt.isAutoSubmitted(),
                 attempt.getSubmittedAt(),
                 attempt.getLastSeenAt(),
                 Instant.now(),
@@ -78,10 +95,54 @@ public class AttemptService {
     }
 
     @Transactional
+    public PreflightResponse completePreflight(Authentication auth, Long attemptId, PreflightRequest request) {
+        Attempt attempt = accessService.requireAttemptOwner(auth, attemptId);
+        stateMachine.requireInProgress(attempt);
+        if (attempt.getPreflightCompletedAt() != null) {
+            return new PreflightResponse(attempt.getPreflightCompletedAt(), attempt.getActiveStartedAt(),
+                    AttemptClock.deadline(attempt), attempt.getExam().getDurationMinutes(), Instant.now());
+        }
+        if (!request.fullscreen() || !request.connectionOk() || !request.deviceOk()
+                || !request.micOk() || !request.noiseOk() || !request.cameraOk()
+                || !request.faceDetected() || !request.gazeOnScreen()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Every pre-exam check must pass before the exam can start");
+        }
+        String photo = request.photoDataUrl().trim();
+        if (!photo.startsWith("data:image/")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The profile photo is not a data URL");
+        }
+
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        attempt.setPreflightCompletedAt(now);
+        attempt.setActiveStartedAt(now);
+        // The clock and coverage both start here, not at page join time.
+        attempt.setStartedAt(now);
+        attempt.setLastSeenAt(now);
+        attempt.setProfilePhoto(photo);
+        attempt.setPhotoTakenAt(now);
+        attempt.setPreflightJson(preflightJson(request));
+        attemptRepository.save(attempt);
+
+        auditService.record(attempt.getStudentUser(), attempt.getExam().getId(), "PREFLIGHT_COMPLETED",
+                "ATTEMPT", attempt.getId(), Map.of(
+                        "fullscreen", true, "connectionOk", true, "deviceOk", true,
+                        "micOk", true, "noiseOk", true, "cameraOk", true,
+                        "faceDetected", true, "gazeOnScreen", true));
+        return new PreflightResponse(now, now, AttemptClock.deadline(attempt),
+                attempt.getExam().getDurationMinutes(), Instant.now());
+    }
+
+    @Transactional
     public SaveAnswerResponse saveAnswer(Authentication auth, Long attemptId, Long questionId,
                                          SaveAnswerRequest request) {
         Attempt attempt = accessService.requireAttemptOwner(auth, attemptId);
         stateMachine.requireInProgress(attempt);
+        requirePreflight(attempt);
+        if (AttemptClock.isPastDeadline(attempt, Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Time is up. Answers saved before the deadline are kept; submit to finish.");
+        }
         Question question = questionRepository.findByIdAndExamId(questionId, attempt.getExam().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Question not found"));
 
@@ -123,6 +184,7 @@ public class AttemptService {
             return new SubmitResponse(attempt.getId(), attempt.getStatus().name(),
                     attempt.getSubmittedAt(), attempt.isLateSubmission());
         }
+        requirePreflight(attempt);
         stateMachine.transition(attempt, AttemptStatus.SUBMITTED);
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         boolean late = isLate(attempt, now);
@@ -167,9 +229,43 @@ public class AttemptService {
     }
 
     private boolean isLate(Attempt attempt, Instant now) {
-        Instant deadline = attempt.getStartedAt()
-                .plus(attempt.getExam().getDurationMinutes(), ChronoUnit.MINUTES);
-        return now.isAfter(deadline);
+        return AttemptClock.isPastDeadline(attempt, now);
+    }
+
+    private void requirePreflight(Attempt attempt) {
+        if (attempt.getExam().isRequiresPreflight() && attempt.getPreflightCompletedAt() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Complete the pre-exam checks before answering or submitting");
+        }
+    }
+
+    private String preflightJson(PreflightRequest request) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("fullscreen", request.fullscreen());
+        detail.put("connectionOk", request.connectionOk());
+        detail.put("deviceOk", request.deviceOk());
+        detail.put("micOk", request.micOk());
+        detail.put("noiseOk", request.noiseOk());
+        detail.put("cameraOk", request.cameraOk());
+        detail.put("faceDetected", request.faceDetected());
+        detail.put("gazeOnScreen", request.gazeOnScreen());
+        if (request.noiseLevel() != null) {
+            detail.put("noiseLevel", request.noiseLevel());
+        }
+        if (request.checks() != null && request.checks().size() <= 20) {
+            // Client diagnostics sit alongside the booleans so the staff view can show them
+            // as plain rows; an attacker-supplied key never overwrites a server verdict.
+            request.checks().forEach((key, value) -> {
+                if (key != null && !key.isBlank() && !detail.containsKey(key)) {
+                    detail.put(key, value);
+                }
+            });
+        }
+        try {
+            return objectMapper.writeValueAsString(detail);
+        } catch (JsonProcessingException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pre-exam checks are not serialisable");
+        }
     }
 
     private SaveAnswerResponse response(AnswerRevision revision, String submittedText) {

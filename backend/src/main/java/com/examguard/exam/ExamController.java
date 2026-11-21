@@ -1,7 +1,9 @@
 package com.examguard.exam;
 
+import com.examguard.attempt.AttemptDtos.AttemptPreflightView;
 import com.examguard.exam.ExamDtos.AttemptSummary;
 import com.examguard.exam.ExamDtos.CreateExamRequest;
+import com.examguard.exam.ExamDtos.ExamPinView;
 import com.examguard.exam.ExamDtos.ExamDetail;
 import com.examguard.exam.ExamDtos.ExamSummary;
 import com.examguard.exam.ExamDtos.PermissionRequest;
@@ -38,12 +40,14 @@ public class ExamController {
     private final ExamService examService;
     private final QuestionService questionService;
     private final CodeJudgeService codeJudgeService;
+    private final ExamPinService examPinService;
 
     public ExamController(ExamService examService, QuestionService questionService,
-                          CodeJudgeService codeJudgeService) {
+                          CodeJudgeService codeJudgeService, ExamPinService examPinService) {
         this.examService = examService;
         this.questionService = questionService;
         this.codeJudgeService = codeJudgeService;
+        this.examPinService = examPinService;
     }
 
     @GetMapping
@@ -103,9 +107,20 @@ public class ExamController {
         examService.removeRosterEntry(authentication, examId, entryId);
     }
 
+    @PostMapping("/{examId}/pin")
+    public ExamPinView issuePin(Authentication authentication, @PathVariable Long examId) {
+        return examPinService.issue(authentication, examId);
+    }
+
     @GetMapping("/{examId}/attempts")
     public List<AttemptSummary> attempts(Authentication authentication, @PathVariable Long examId) {
         return examService.attempts(authentication, examId);
+    }
+
+    @GetMapping("/{examId}/attempts/{attemptId}/preflight")
+    public AttemptPreflightView preflight(Authentication authentication, @PathVariable Long examId,
+                                          @PathVariable Long attemptId) {
+        return examService.preflight(authentication, examId, attemptId);
     }
 
     @PostMapping("/{examId}/questions")

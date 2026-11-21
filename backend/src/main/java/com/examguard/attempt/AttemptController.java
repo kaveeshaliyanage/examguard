@@ -7,6 +7,8 @@ import com.examguard.attempt.AttemptDtos.EventBatchResponse;
 import com.examguard.attempt.AttemptDtos.HeartbeatRequest;
 import com.examguard.attempt.AttemptDtos.IntegritySignalRequest;
 import com.examguard.attempt.AttemptDtos.IntegritySignalResponse;
+import com.examguard.attempt.AttemptDtos.PreflightRequest;
+import com.examguard.attempt.AttemptDtos.PreflightResponse;
 import com.examguard.attempt.AttemptDtos.SaveAnswerRequest;
 import com.examguard.attempt.AttemptDtos.SaveAnswerResponse;
 import com.examguard.attempt.AttemptDtos.SubmitRequest;
@@ -48,6 +50,14 @@ public class AttemptController {
     @GetMapping
     public AttemptState state(Authentication authentication, @PathVariable Long attemptId) {
         return attemptService.state(authentication, attemptId);
+    }
+
+    @PostMapping("/preflight")
+    public PreflightResponse preflight(
+            Authentication authentication,
+            @PathVariable Long attemptId,
+            @Valid @RequestBody PreflightRequest request) {
+        return attemptService.completePreflight(authentication, attemptId, request);
     }
 
     @PutMapping("/answers/{questionId}")

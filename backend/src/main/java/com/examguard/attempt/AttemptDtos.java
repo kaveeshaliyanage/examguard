@@ -23,6 +23,7 @@ public final class AttemptDtos {
     public record JoinRequest(
             @NotBlank String examCode,
             @NotBlank String candidateCode,
+            @Size(max = 12) String accessPin,
             String resumeToken) {
     }
 
@@ -60,6 +61,10 @@ public final class AttemptDtos {
             String collectorToken,
             String status,
             Instant startedAt,
+            Instant activeStartedAt,
+            Instant preflightCompletedAt,
+            boolean requiresPreflight,
+            boolean autoSubmitted,
             Instant submittedAt,
             Instant serverNow,
             boolean extensionConnected,
@@ -71,6 +76,10 @@ public final class AttemptDtos {
             Long attemptId,
             String status,
             Instant startedAt,
+            Instant activeStartedAt,
+            Instant preflightCompletedAt,
+            boolean requiresPreflight,
+            boolean autoSubmitted,
             Instant submittedAt,
             Instant lastSeenAt,
             Instant serverNow,
@@ -81,6 +90,35 @@ public final class AttemptDtos {
             String terminationReason,
             ExamForAttempt exam,
             List<AnswerView> answers) {
+    }
+
+    public record PreflightRequest(
+            boolean fullscreen,
+            boolean connectionOk,
+            boolean deviceOk,
+            boolean micOk,
+            boolean noiseOk,
+            boolean cameraOk,
+            boolean faceDetected,
+            boolean gazeOnScreen,
+            @Size(max = 200) String noiseLevel,
+            @NotBlank @Size(max = 500_000) String photoDataUrl,
+            Map<String, Object> checks) {
+    }
+
+    public record PreflightResponse(
+            Instant completedAt,
+            Instant activeStartedAt,
+            Instant deadlineAt,
+            int durationMinutes,
+            Instant serverNow) {
+    }
+
+    public record AttemptPreflightView(
+            Instant completedAt,
+            Instant photoTakenAt,
+            String photoDataUrl,
+            Map<String, Object> checks) {
     }
 
     public record SaveAnswerRequest(
