@@ -1,5 +1,10 @@
 server:
   port: 8080
+  # Behind Render's load balancer or the nginx proxy every request arrives from the proxy, so
+  # rate limits keyed on the client address would lump all students together. Tomcat's remote-IP
+  # valve takes the client from X-Forwarded-For, trusting only private-range proxies by default;
+  # widen that with SERVER_TOMCAT_REMOTEIP_INTERNALPROXIES (a regex) if your proxy is elsewhere.
+  forward-headers-strategy: native
   error:
     include-message: never
     include-stacktrace: never
@@ -12,6 +17,9 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/examguard?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${SPRING_DATASOURCE_USERNAME:examguard}
     password: ${SPRING_DATASOURCE_PASSWORD:examguard}
+    hikari:
+      # Keep this under the database's connection limit (Supabase's pooler caps each user).
+      maximum-pool-size: ${DB_POOL_SIZE:10}
   jpa:
     open-in-view: false
     hibernate:
@@ -53,6 +61,11 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+  health:
+    # PIN email is optional and must never take the API down: an SMTP outage (or no relay at
+    # all) would otherwise turn /actuator/health DOWN and make Render pull the instance.
+    mail:
+      enabled: false
 
 app:
   db:
@@ -64,6 +77,8 @@ app:
     attempt-ttl-minutes: ${JWT_ATTEMPT_TTL_MINUTES:360}
   analysis:
     base-url: ${ANALYSIS_BASE_URL:http://localhost:8000}
+    # Shared secret sent as X-Analysis-Token; required whenever the analysis service is public.
+    token: ${ANALYSIS_TOKEN:}
     connect-timeout-ms: 5000
     read-timeout-ms: 120000
   code-runner:
@@ -80,6 +95,11 @@ app:
   attempt-expiry:
     interval-ms: ${ATTEMPT_EXPIRY_INTERVAL_MS:15000}
   seed-demo-data: ${SEED_DEMO_DATA:false}
+  # Creates the first ADMIN on an empty database; ignored once any administrator exists.
+  bootstrap-admin:
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    display-name: ${BOOTSTRAP_ADMIN_NAME:Administrator}
 
 logging:
   level:

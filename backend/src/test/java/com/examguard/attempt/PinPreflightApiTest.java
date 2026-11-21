@@ -332,7 +332,7 @@ class PinPreflightApiTest extends ApiTestBase {
         assertThat(expiryService.expire(liveAttemptId)).isFalse();
 
         Attempt attempt = attemptRepository.findById(attemptId).orElseThrow();
-        Instant past = Instant.now().minus(61, ChronoUnit.MINUTES);
+        Instant past = Instant.now().minus(61, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MICROS);
         attempt.setActiveStartedAt(past);
         attempt.setStartedAt(past);
         attemptRepository.save(attempt);
@@ -346,7 +346,8 @@ class PinPreflightApiTest extends ApiTestBase {
         Attempt expired = attemptRepository.findById(attemptId).orElseThrow();
         assertThat(expired.getStatus()).isEqualTo(AttemptStatus.SUBMITTED);
         assertThat(expired.isAutoSubmitted()).isTrue();
-        assertThat(expired.getSubmittedAt()).isNotNull();
+        // A late scheduler tick still records the deadline, not the time it woke up.
+        assertThat(expired.getSubmittedAt()).isEqualTo(past.plus(60, ChronoUnit.MINUTES));
         assertThat(revisionRepository.countByAttemptId(attemptId)).isEqualTo(1);
 
         mvc.perform(get("/api/attempts/" + attemptId).header("Authorization", token))

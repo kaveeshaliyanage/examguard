@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
 from .features.semantic import status as semantic_status
@@ -27,7 +29,25 @@ app = FastAPI(
         "not probabilities of misconduct. Pair, incident and authorship schemas are isolated. "
         "Authorship stylometry is a review aid and is capped at priority 54 (band MEDIUM)."
     ),
+    # A public deployment sets ANALYSIS_TOKEN; it then has no reason to publish its API docs.
+    docs_url=None if os.environ.get("ANALYSIS_TOKEN") else "/docs",
+    redoc_url=None if os.environ.get("ANALYSIS_TOKEN") else "/redoc",
+    openapi_url=None if os.environ.get("ANALYSIS_TOKEN") else "/openapi.json",
 )
+
+
+def require_token(x_analysis_token: str | None = Header(default=None)) -> None:
+    """Enforce the shared backend secret whenever ANALYSIS_TOKEN is configured.
+
+    Compose keeps the service on a private network and leaves the token unset. A deployment that
+    exposes the service publicly (Render's free plan has no private services) must set it on both
+    the backend and this service.
+    """
+    expected = os.environ.get("ANALYSIS_TOKEN")
+    if not expected:
+        return
+    if x_analysis_token is None or not hmac.compare_digest(x_analysis_token, expected):
+        raise HTTPException(status_code=401, detail="Invalid analysis token")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -55,7 +75,7 @@ def root() -> dict:
     }
 
 
-@app.post("/analyze/pairs", response_model=AnalysisResponse)
+@app.post("/analyze/pairs", response_model=AnalysisResponse, dependencies=[Depends(require_token)])
 def pairs(request: PairAnalysisRequest) -> AnalysisResponse:
     logger.info(
         "pair analysis exam=%s candidates=%s mode=%s",
@@ -66,7 +86,7 @@ def pairs(request: PairAnalysisRequest) -> AnalysisResponse:
     return analyze_pairs(request)
 
 
-@app.post("/analyze/incidents", response_model=AnalysisResponse)
+@app.post("/analyze/incidents", response_model=AnalysisResponse, dependencies=[Depends(require_token)])
 def incidents(request: IncidentAnalysisRequest) -> AnalysisResponse:
     logger.info(
         "incident analysis exam=%s candidates=%s mode=%s",
@@ -77,7 +97,7 @@ def incidents(request: IncidentAnalysisRequest) -> AnalysisResponse:
     return analyze_incidents(request)
 
 
-@app.post("/analyze/authorship", response_model=AuthorshipResponse)
+@app.post("/analyze/authorship", response_model=AuthorshipResponse, dependencies=[Depends(require_token)])
 def authorship(request: AuthorshipRequest) -> AuthorshipResponse:
     logger.info(
         "authorship analysis exam=%s candidates=%s mode=%s",

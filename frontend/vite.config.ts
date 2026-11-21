@@ -4,6 +4,13 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  // Vercel serves only static files: a relative API base would send every call to the SPA and
+  // fail silently, so a Vercel build must be pointed at the absolute API URL.
+  if (process.env.VERCEL && mode === 'production' && !/^https:\/\/.+\/api$/.test(env.VITE_API_BASE ?? '')) {
+    throw new Error(
+      'VITE_API_BASE must be the absolute HTTPS API URL ending in /api, e.g. https://examguard-api.onrender.com/api',
+    );
+  }
   return {
     plugins: [react()],
     server: {
