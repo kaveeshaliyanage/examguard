@@ -25,14 +25,18 @@ public class AnalysisClient {
     public AnalysisClient(
             @Value("${app.analysis.base-url:http://localhost:8000}") String baseUrl,
             @Value("${app.analysis.connect-timeout-ms:5000}") long connectTimeoutMs,
-            @Value("${app.analysis.read-timeout-ms:120000}") long readTimeoutMs) {
+            @Value("${app.analysis.read-timeout-ms:120000}") long readTimeoutMs,
+            @Value("${app.analysis.token:}") String token) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
         factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
-        this.client = RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl(baseUrl)
-                .requestFactory(factory)
-                .build();
+                .requestFactory(factory);
+        if (token != null && !token.isBlank()) {
+            builder = builder.defaultHeader("X-Analysis-Token", token);
+        }
+        this.client = builder.build();
     }
 
     public boolean isHealthy() {

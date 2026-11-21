@@ -26,7 +26,10 @@ COPY --from=build /workspace/target/examguard-backend-*.jar app.jar
 USER examguard
 EXPOSE 8080
 
+# Overridable per platform: small instances (e.g. Render free, 512 MB) set a tighter profile.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"
+
 HEALTHCHECK --interval=20s --timeout=5s --start-period=40s --retries=5 \
     CMD curl -fsS http://localhost:8080/api/health >/dev/null || exit 1
 
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
