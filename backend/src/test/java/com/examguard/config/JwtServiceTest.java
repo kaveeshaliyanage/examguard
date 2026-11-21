@@ -62,6 +62,13 @@ class JwtServiceTest {
     }
 
     @Test
+    void refusesToStartWithoutASecret() {
+        assertThatThrownBy(() -> new JwtService("", 60, 60))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("32 bytes");
+    }
+
+    @Test
     void rejectsATamperedToken() {
         User user = new User();
         ReflectionTestUtils.setField(user, "id", 1L);

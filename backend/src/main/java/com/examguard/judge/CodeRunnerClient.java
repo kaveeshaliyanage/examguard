@@ -15,9 +15,11 @@ import java.time.Duration;
 public class CodeRunnerClient {
 
     private final RestClient client;
+    private final String token;
 
     public CodeRunnerClient(
             @Value("${app.code-runner.base-url:http://localhost:8001}") String baseUrl,
+            @Value("${app.code-runner.token:}") String token,
             @Value("${app.code-runner.connect-timeout-ms:3000}") long connectTimeoutMs,
             @Value("${app.code-runner.read-timeout-ms:90000}") long readTimeoutMs) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -27,13 +29,17 @@ public class CodeRunnerClient {
                 .baseUrl(baseUrl)
                 .requestFactory(factory)
                 .build();
+        this.token = token;
     }
 
     public RunnerResponse run(RunnerRequest request) {
-        return client.post()
+        RestClient.RequestBodySpec spec = client.post()
                 .uri("/run")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
+                .contentType(MediaType.APPLICATION_JSON);
+        if (token != null && !token.isBlank()) {
+            spec = spec.header("X-Runner-Token", token);
+        }
+        return spec.body(request)
                 .retrieve()
                 .body(RunnerResponse.class);
     }

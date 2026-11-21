@@ -6,12 +6,20 @@
 
 from __future__ import annotations
 
+import os
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app import sandbox
 from app.main import app
 from app.sandbox import execute
 from app.schemas import RunRequest, TestCase as Case
+
+RUNNER_TOKEN = "test-runner-token"
+# Override, not setdefault: a shell-provided token must not change what these tests expect.
+os.environ["RUNNER_TOKEN"] = RUNNER_TOKEN
 
 
 def run(language: str, source: str, tests: list[tuple[str, str]], time_limit_ms: int = 2000):
@@ -169,7 +177,7 @@ def test_java_compile_error_marks_every_case():
     assert all(result.passed is False for result in response.tests)
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Runner-Token": RUNNER_TOKEN})
 
 
 def test_health_endpoint_answers_up():
@@ -177,6 +185,45 @@ def test_health_endpoint_answers_up():
 
     assert response.status_code == 200
     assert response.json() == {"status": "UP"}
+
+
+def test_run_requires_the_shared_token():
+    payload = {
+        "language": "PYTHON",
+        "source": "print(1)",
+        "tests": [{"expectedOutput": "1"}],
+    }
+
+    assert TestClient(app).post("/run", json=payload).status_code == 401
+    assert TestClient(app, headers={"X-Runner-Token": "wrong"}).post(
+        "/run", json=payload
+    ).status_code == 401
+
+
+def test_run_fails_closed_when_no_token_is_configured(monkeypatch):
+    monkeypatch.delenv("RUNNER_TOKEN", raising=False)
+    response = TestClient(app, headers={"X-Runner-Token": RUNNER_TOKEN}).post(
+        "/run",
+        json={"language": "PYTHON", "source": "print(1)", "tests": [{"expectedOutput": "1"}]},
+    )
+
+    assert response.status_code == 503
+
+
+def test_run_sheds_load_with_retry_after(monkeypatch):
+    monkeypatch.setattr(sandbox, "_slots", threading.Semaphore(0))
+
+    response = client.post(
+        "/run",
+        json={"language": "PYTHON", "source": "print(1)", "tests": [{"expectedOutput": "1"}]},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "5"
+
+
+def test_total_budget_stays_below_the_backend_read_timeout():
+    assert sandbox.MAX_TOTAL_SECONDS < 90
 
 
 def test_run_endpoint_rejects_an_empty_test_list():

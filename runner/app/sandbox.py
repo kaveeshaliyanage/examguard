@@ -21,7 +21,8 @@ from .schemas import RunRequest, RunResponse, TestCase, TestResult
 
 MAX_OUTPUT_BYTES = 8192
 COMPILE_TIMEOUT_SECONDS = 20
-MAX_TOTAL_SECONDS = 100
+# Stays below the backend client's 90 s read timeout so a slow run never looks like an outage.
+MAX_TOTAL_SECONDS = 75
 MESSAGE_CHARS = 600
 
 _SOURCE_FILES = {"PYTHON": "solution.py", "JAVASCRIPT": "solution.js", "JAVA": "Main.java"}
@@ -32,6 +33,10 @@ _MEMORY_LIMITS = {"PYTHON": 256 * 1024 * 1024, "JAVASCRIPT": None, "JAVA": None}
 _slots = threading.BoundedSemaphore(int(os.environ.get("MAX_CONCURRENCY", "2")))
 
 
+class TooBusy(RuntimeError):
+    """Raised when every execution slot is taken; the caller should retry later."""
+
+
 @dataclass
 class _Outcome:
     exit_code: int
@@ -40,11 +45,12 @@ class _Outcome:
     timed_out: bool
 
 
-def _rlimits(memory_bytes: int | None):
+def _rlimits(memory_bytes: int | None, cpu_seconds: int):
     def apply() -> None:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         resource.setrlimit(resource.RLIMIT_FSIZE, (1 << 20, 1 << 20))
         resource.setrlimit(resource.RLIMIT_NPROC, (256, 256))
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
         if memory_bytes:
             resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
 
@@ -74,7 +80,7 @@ def _run(command: list[str], workdir: Path, stdin_text: str, timeout_seconds: fl
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=_environment(),
-        preexec_fn=_rlimits(memory_bytes),
+        preexec_fn=_rlimits(memory_bytes, int(timeout_seconds) + 2),
         start_new_session=True,
     )
     try:
@@ -101,20 +107,26 @@ def _tail(data: bytes) -> str:
 
 
 def execute(request: RunRequest) -> RunResponse:
-    with _slots:
+    if not _slots.acquire(blocking=False):
+        raise TooBusy("The code runner is busy. Retry shortly.")
+    try:
         with tempfile.TemporaryDirectory(prefix="examguard-", dir="/tmp") as directory:
             return _execute_in(request, Path(directory))
+    finally:
+        _slots.release()
 
 
 def _execute_in(request: RunRequest, workdir: Path) -> RunResponse:
+    deadline = time.monotonic() + MAX_TOTAL_SECONDS
     source_file = _SOURCE_FILES[request.language]
     (workdir / source_file).write_text(request.source, encoding="utf-8")
 
     command = _command(request.language)
     if request.language == "JAVA":
+        compile_budget = max(1.0, min(COMPILE_TIMEOUT_SECONDS, deadline - time.monotonic()))
         compile_result = _run(
             ["javac", "-encoding", "UTF-8", "-J-Xmx256m", source_file],
-            workdir, "", COMPILE_TIMEOUT_SECONDS, None)
+            workdir, "", compile_budget, None)
         if compile_result.exit_code != 0:
             message = _tail(compile_result.stderr) or "Compilation failed."
             return RunResponse(
@@ -127,15 +139,16 @@ def _execute_in(request: RunRequest, workdir: Path) -> RunResponse:
             )
 
     results: list[TestResult] = []
-    deadline = time.monotonic() + MAX_TOTAL_SECONDS
     timeout_seconds = request.timeLimitMs / 1000
     for index, case in enumerate(request.tests):
-        if time.monotonic() > deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             results.append(TestResult(index=index, passed=False, status="NOT_RUN",
                                       durationMs=0, message="The run exceeded its total time budget."))
             continue
         started = time.monotonic()
-        outcome = _run(command, workdir, case.input, timeout_seconds, _MEMORY_LIMITS[request.language])
+        outcome = _run(command, workdir, case.input, min(timeout_seconds, remaining),
+                       _MEMORY_LIMITS[request.language])
         duration_ms = int((time.monotonic() - started) * 1000)
         results.append(_result(index, case, outcome, duration_ms))
     return RunResponse(tests=results)

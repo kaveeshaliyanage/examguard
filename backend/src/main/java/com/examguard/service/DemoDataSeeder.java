@@ -49,7 +49,7 @@ public class DemoDataSeeder implements CommandLineRunner {
             DemoAttemptSeeder attemptSeeder,
             DemoTypedExamSeeder typedExamSeeder,
             DemoCodeExamSeeder codeExamSeeder,
-            @Value("${app.seed-demo-data:true}") boolean enabled) {
+            @Value("${app.seed-demo-data:false}") boolean enabled) {
         this.userRepository = userRepository;
         this.examRepository = examRepository;
         this.auditRepository = auditRepository;
