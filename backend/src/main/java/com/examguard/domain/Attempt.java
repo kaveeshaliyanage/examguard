@@ -40,6 +40,25 @@ public class Attempt {
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
+    /** Set once the supervised pre-exam window is confirmed; the exam clock starts here. */
+    @Column(name = "active_started_at")
+    private Instant activeStartedAt;
+
+    @Column(name = "preflight_completed_at")
+    private Instant preflightCompletedAt;
+
+    @Column(name = "preflight_json", columnDefinition = "text")
+    private String preflightJson;
+
+    @Column(name = "profile_photo", columnDefinition = "text")
+    private String profilePhoto;
+
+    @Column(name = "photo_taken_at")
+    private Instant photoTakenAt;
+
+    @Column(name = "auto_submitted", nullable = false)
+    private boolean autoSubmitted;
+
     @Column(name = "submitted_at")
     private Instant submittedAt;
 

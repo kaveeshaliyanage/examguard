@@ -53,6 +53,21 @@ public class Exam {
     @Column(columnDefinition = "text")
     private String instructions;
 
+    @Column(name = "requires_pin", nullable = false)
+    private boolean requiresPin;
+
+    @Column(name = "access_pin_hash", length = 100)
+    private String accessPinHash;
+
+    @Column(name = "access_pin_issued_at")
+    private Instant accessPinIssuedAt;
+
+    @Column(name = "access_pin_sent_at")
+    private Instant accessPinSentAt;
+
+    @Column(name = "requires_preflight", nullable = false)
+    private boolean requiresPreflight = true;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
