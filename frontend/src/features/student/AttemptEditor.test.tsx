@@ -96,4 +96,33 @@ describe('AttemptEditor integrity monitoring', () => {
     expect(screen.queryByRole('button', { name: 'Resume exam' })).not.toBeInTheDocument();
     expect(strikes).toBe(3);
   }, 30000);
+
+  it('does not submit while an answer is still unsaved', async () => {
+    const user = userEvent.setup();
+    let submits = 0;
+    server.use(
+      http.put('/api/attempts/1/answers/:questionId', () =>
+        HttpResponse.json({ message: 'The answer could not be stored' }, { status: 500 }),
+      ),
+      http.post('/api/attempts/1/submit', () => {
+        submits += 1;
+        return HttpResponse.json({ message: 'should not be called' }, { status: 500 });
+      }),
+    );
+    writeAttemptSession(session);
+
+    renderRoute(<AttemptEditor state={attemptStateFixture} session={session} />, {
+      path: '/attempt/:attemptId',
+      initialEntry: '/attempt/1',
+    });
+
+    const answer = await screen.findByLabelText('Answer for question 1');
+    await user.type(answer, 'This answer never reaches the server.');
+    await user.click(screen.getByRole('button', { name: 'Submit exam' }));
+    await user.click(await screen.findByRole('button', { name: 'Submit now' }));
+
+    expect(await screen.findByText(/Some answers could not be saved/i)).toBeInTheDocument();
+    expect(submits).toBe(0);
+    expect(screen.getByRole('button', { name: 'Submit exam' })).toBeInTheDocument();
+  }, 60000);
 });

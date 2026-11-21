@@ -126,7 +126,9 @@ export function AttemptEditor({
       } catch (caught) {
         const message =
           caught instanceof ApiError
-            ? caught.message
+            ? auto && caught.path === 'autosave'
+              ? 'Time is up, but some answers could not be saved, so the exam was not submitted. Reconnect and submit again.'
+              : caught.message
             : auto
               ? 'Time is up but the submission did not reach the server. Please submit again.'
               : 'Could not submit the exam. Your attempt is still open; please retry.';
@@ -457,8 +459,16 @@ export function AttemptEditor({
         maxStrikes={maxStrikes}
         onResume={() => {
           setWarning(null);
-          void autosave.flushAll();
-          showToast('Resumed. Your answers are saved.', { severity: 'success', duration: 3500 });
+          void autosave
+            .flushAll()
+            .then(() => {
+              showToast('Resumed. Your answers are saved.', { severity: 'success', duration: 3500 });
+            })
+            .catch(() => {
+              showToast('Resumed, but some answers are still not saved. Reconnect and retry.', {
+                severity: 'error',
+              });
+            });
         }}
       />
 

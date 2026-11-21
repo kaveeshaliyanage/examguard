@@ -279,11 +279,29 @@ export function useAutosave({
   const flushAll = useCallback(async () => {
     const pending = [...entries.current.keys()].map((questionId) => flush(questionId));
     await Promise.all(pending);
+    const unsaved = [...entries.current.values()].filter(
+      (entry) => !entry.disposed && !isUpToDate(entry),
+    );
+    if (unsaved.length > 0) {
+      unsaved.forEach((entry) => {
+        if (entry.retryTimer) {
+          clearTimeout(entry.retryTimer);
+          entry.retryTimer = null;
+        }
+      });
+      throw new ApiError(
+        0,
+        'Some answers could not be saved. Check your connection and try again.',
+        'autosave',
+        'network',
+      );
+    }
   }, [flush]);
 
   useEffect(() => {
     const flushAllRef = () => {
-      void flushAll();
+      // Nothing can be shown while the page is going away; the editor reports a failed flush on submit.
+      void flushAll().catch(() => undefined);
     };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {

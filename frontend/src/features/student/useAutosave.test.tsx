@@ -96,6 +96,31 @@ describe('useAutosave', () => {
     expect(saveAnswerMock).toHaveBeenCalledTimes(1);
   });
 
+  it('flushAll rejects when an answer could not be saved', async () => {
+    saveAnswerMock.mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() =>
+      useAutosave({ attemptId: 7, token: 'token', initialAnswers }),
+    );
+
+    act(() => result.current.setAnswer(101, 'text that must not be lost'));
+    await expect(result.current.flushAll()).rejects.toThrow('could not be saved');
+    expect(result.current.answers[101]?.text).toBe('text that must not be lost');
+    expect(result.current.hasUnsavedChanges).toBe(true);
+  });
+
+  it('flushAll resolves once every answer is on the server', async () => {
+    saveAnswerMock.mockResolvedValue(saved(1));
+    const { result } = renderHook(() =>
+      useAutosave({ attemptId: 7, token: 'token', initialAnswers }),
+    );
+
+    act(() => result.current.setAnswer(101, 'saved text'));
+    await act(async () => {
+      await result.current.flushAll();
+    });
+    expect(result.current.hasUnsavedChanges).toBe(false);
+  });
+
   it('keeps saving after the StrictMode development remount', async () => {
     saveAnswerMock.mockResolvedValueOnce(saved(1));
     const wrapper = ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>;
